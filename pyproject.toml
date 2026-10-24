@@ -1,0 +1,22 @@
+[project]
+name = "time-series-models"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fev>=0.10.0",
+    "gluonts>=0.16",
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.4",
+    "timestral",
+    "wandb>=0.31.0",
+]
+
+[tool.uv.workspace]
+members = [
+    "timestral",
+]
+
+[tool.uv.sources]
+timestral = { workspace = true, editable = true }

@@ -1,0 +1,3 @@
+[submodule "timestral"]
+	path = timestral
+	url = https://github.com/mistralai/timestral.git
