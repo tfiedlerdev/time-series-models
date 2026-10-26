@@ -44,7 +44,7 @@ def calendar(length: int, daily_phase: float, weekly_phase: float) -> np.ndarray
 
 
 def make_signal(rng: np.random.Generator, length: int) -> np.ndarray:
-    """Seasonal swing plus a mean-reverting walk, the same process as main.py."""
+    """Seasonal swing plus a mean-reverting walk, the signal measured in view_curve.py."""
     innov = rng.normal(0, 0.35, length)
     signal = np.empty(length)
     signal[0] = innov[0]

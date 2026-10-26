@@ -29,7 +29,7 @@ def make_pool_batch(
     """Clean target. `n_known` views extend over the horizon.
 
     Half of training batches hold a pool of views and reveal only `n_known` of them over the
-    horizon. The others stop at the origin, which is the split in main.py. That pool is 20 views
+    horizon. The others stop at the origin, which is the split in view_curve.py. That pool is 20 views
     for a count of 16 or below, and 64 for a count of 32 or 64. The remaining batches are known
     views only, and half of those append unrelated series.
     """

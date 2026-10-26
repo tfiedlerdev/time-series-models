@@ -1,11 +1,11 @@
-# %%
 """Error against how many noisy views are known ahead.
 
 One clean signal, 100 noisy views. A count chooses which views extend over the horizon;
 the rest stop at the origin. The same draws are scored with the pretrained 5M model and
-with the latest fine-tune, checkpoints/pool-mix-5m.pt.
+with the latest fine-tune, checkpoints/pool-mix-5m.pt. This is the measurement behind
+findings/view-curve.md.
 
-    uv run python main.py
+    uv run python view_curve.py
 """
 
 from pathlib import Path

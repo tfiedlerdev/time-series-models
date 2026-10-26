@@ -15,7 +15,7 @@ from training.batches import (
 from training.schedule import CONTEXT_LEN, EVAL_TASKS, HISTORY_KINDS, HORIZON, LONG_CONTEXT
 from training.series import make_covariate, make_signal
 
-# The main.py curve, logged at a few counts. A full sweep of every count is the notebook plot.
+# The view_curve.py figure, logged at a few counts. That script sweeps every count.
 VIEW_COUNTS = (0, 1, 8, 32, 64)
 VIEW_POOL = 64
 
@@ -191,7 +191,7 @@ def split_mae(forecaster: TimestralForecaster, signal: np.ndarray, covariates: n
     """MAE when `chosen` views are known over the horizon and the rest stop at the origin.
 
     Uses the public forecast, including symmetric averaging, with no non-negative clip.
-    That is the main.py measurement.
+    That is the view_curve.py measurement.
     """
     rest = np.setdiff1d(np.arange(covariates.shape[0]), chosen)
     kwargs = {"clip_nonnegative": False}
@@ -211,7 +211,7 @@ def view_curve(
     n_views: int = VIEW_POOL,
     counts: tuple[int, ...] = VIEW_COUNTS,
 ) -> dict[str, float]:
-    """Median MAE of the main.py split at a few counts. One new series per draw."""
+    """Median MAE of the view_curve.py split at a few counts. One new series per draw."""
     rng = np.random.default_rng(seed)
     columns: dict[int, list[float]] = {count: [] for count in counts}
     for _ in range(n_draws):
