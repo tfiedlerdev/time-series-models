@@ -31,10 +31,15 @@ def walk(rng: np.random.Generator, length: int, scale: float) -> np.ndarray:
     return out
 
 
-def calendar(length: int, daily_phase: float, weekly_phase: float) -> np.ndarray:
+def seasonal_parts(length: int, daily_phase: float, weekly_phase: float) -> tuple[np.ndarray, np.ndarray]:
     time = np.arange(length)
     daily = np.sin(2 * np.pi * time / 24.0 + daily_phase)
     weekly = 0.6 * np.sin(2 * np.pi * time / 168.0 + weekly_phase)
+    return daily, weekly
+
+
+def calendar(length: int, daily_phase: float, weekly_phase: float) -> np.ndarray:
+    daily, weekly = seasonal_parts(length, daily_phase, weekly_phase)
     return daily + weekly
 
 

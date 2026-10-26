@@ -1,16 +1,17 @@
 """Fine-tune Timestral-5M to pool noisy views without dropping its other forecasts.
 
-Pooling is 30% of the steps: a clean target, nonlinear noisy views known over
-the horizon, and a covariate count drawn from 0 through 64. Zero covariates is an
-ordinary forecast of that same series. Batches that do have views also get unrelated
-series mixed in, so the loss only falls when those are ignored.
+Pooling is 15% of the steps: a clean target and noisy views of it. Half of those
+batches reveal only some of a pool over the horizon and keep the rest as
+past-only rows. Most of those pools are 20 views. A thin tail still uses 64. The other half are known views only, and some of those mix in
+unrelated series. Zero known views is an ordinary forecast of that same series.
 
-The exogenous task is 25% of the steps. The target is driven by a latent process.
-Some known rows are noisy readings of that process. Others share its daily and weekly
-cycle but have independent innovations, and that mismatch is already visible in the
-context. Some of those batches are nonnegative, gated by a known on/off pattern, or
-shifted by a static category. A past-only task carries measurements that stop at the
-forecast origin.
+The exogenous task is 40% of the steps. The target is driven by a latent process.
+Some known rows are noisy readings of that process. Decoy rows share one piece of it
+and differ on the rest: both cycles, only the daily cycle, or only the slope. That
+mismatch is already visible in the context. A quarter of the batches have no true
+reading at all. Some are nonnegative,
+gated by a known on/off pattern, or shifted by a static category. A past-only task
+carries measurements that stop at the forecast origin.
 
 The remaining steps replay other forecasts. History-only batches use a random walk,
 a different seasonal pair, or a trend. A few batches forecast several coupled series

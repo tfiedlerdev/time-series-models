@@ -4,8 +4,18 @@ import numpy as np
 import torch
 from timestral.covariate_encoding import target_encode
 
-from training.schedule import CONTEXT_LEN, COUNTS, EXO_HORIZON, HISTORY_KINDS, HORIZON, LONG_CONTEXT, TASK_P, TASKS
-from training.series import calendar, lag, make_covariate, make_series, make_signal, observe, pack, walk
+from training.schedule import (
+    CONTEXT_LEN,
+    COUNT_P,
+    COUNTS,
+    EXO_HORIZON,
+    HISTORY_KINDS,
+    HORIZON,
+    LONG_CONTEXT,
+    TASK_P,
+    TASKS,
+)
+from training.series import lag, make_covariate, make_series, make_signal, observe, pack, seasonal_parts, walk
 
 
 def make_pool_batch(
@@ -14,24 +24,39 @@ def make_pool_batch(
     device: torch.device,
     n_known: int | None = None,
     distractors: bool = True,
-) -> tuple[torch.Tensor, torch.Tensor | None, None, torch.Tensor, str]:
-    """Clean target. `n_known` views, plus unrelated series on some training batches."""
+    past_views: bool | None = None,
+) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor, str]:
+    """Clean target. `n_known` views extend over the horizon.
+
+    Half of training batches hold a pool of views and reveal only `n_known` of them over the
+    horizon. The others stop at the origin, which is the split in main.py. That pool is 20 views
+    for a count of 16 or below, and 64 for a count of 32 or 64. The remaining batches are known
+    views only, and half of those append unrelated series.
+    """
     if n_known is None:
-        n_known = int(rng.choice(COUNTS))
-    n_distractors = int(rng.integers(1, 9)) if distractors and n_known > 0 and rng.random() < 0.5 else 0
+        n_known = int(rng.choice(COUNTS, p=COUNT_P))
+    if past_views is None:
+        past_views = n_known < 64 and rng.random() < 0.5
+    width = 64 if n_known >= 32 else 20
+    n_past = width - n_known if past_views else 0
+    n_distractors = 0 if past_views else (int(rng.integers(1, 9)) if distractors and n_known > 0 and rng.random() < 0.5 else 0)
     length = CONTEXT_LEN + HORIZON
-    contexts, knowns, futures = [], [], []
+    contexts, knowns, pasts, futures = [], [], [], []
     for _ in range(batch):
         signal = make_signal(rng, length)
         views = [make_covariate(signal, rng) for _ in range(n_known)]
+        hidden = [make_covariate(signal, rng)[:CONTEXT_LEN] for _ in range(n_past)]
         extras = [make_series(rng, length, str(rng.choice(HISTORY_KINDS))) for _ in range(n_distractors)]
         contexts.append(signal[:CONTEXT_LEN])
         futures.append(signal[CONTEXT_LEN:])
         if views or extras:
             knowns.append(np.stack(views + extras))
+        if hidden:
+            pasts.append(np.stack(hidden))
     known = torch.tensor(np.stack(knowns), dtype=torch.float32, device=device) if knowns else None
-    tag = f"pool {n_known}+{n_distractors}"
-    return pack(contexts, False, device), known, None, pack(futures, False, device), tag
+    past = torch.tensor(np.stack(pasts), dtype=torch.float32, device=device) if pasts else None
+    tag = f"pool {n_known}+{n_distractors} past{n_past}"
+    return pack(contexts, False, device), known, past, pack(futures, False, device), tag
 
 
 def make_history_batch(
@@ -101,6 +126,31 @@ def make_categorical_batch(
     return pack(contexts, False, device), known, None, pack(futures, False, device), tag
 
 
+def _decoy_row(
+    kind: str,
+    daily: np.ndarray,
+    weekly: np.ndarray,
+    weekly_phase: float,
+    trend_line: np.ndarray,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """A known row that shares one piece of the target and differs on the rest.
+
+    `both` shares the daily and weekly cycles. `daily` shares only the daily cycle and uses the
+    opposite weekly phase. `trend` shares the slope and none of the cycles. Every kind carries
+    its own walk, over the context and the horizon.
+    """
+    residual = 0.35 * walk(rng, daily.shape[0], 0.25)
+    if kind == "both":
+        return daily + weekly + residual
+    if kind == "daily":
+        other_weekly = 0.6 * np.sin(2 * np.pi * np.arange(daily.shape[0]) / 168.0 + weekly_phase + np.pi)
+        return daily + other_weekly + residual
+    if kind == "trend":
+        return trend_line + residual
+    raise ValueError(kind)
+
+
 def make_exogenous_batch(
     rng: np.random.Generator,
     batch: int,
@@ -111,13 +161,20 @@ def make_exogenous_batch(
     nonnegative: bool | None = None,
     gate: bool | None = None,
     horizon: int | None = None,
+    decoy_kind: str | None = None,
+    trend: bool | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, None, torch.Tensor, str]:
-    """Target driven by one latent walk. Some known rows read it; decoys only share the calendar.
+    """Target driven by one latent walk, a calendar, and sometimes a slope.
 
-    A decoy has the same daily and weekly periods as the target and an independent walk, over the
-    context as well as the horizon. A gate is an on/off pattern known over the horizon that
-    multiplies the target. A static code is constant per series and target-encoded.
+    Some known rows are noisy readings of the walk plus the calendar. Decoys share one piece of
+    the target: both cycles, the daily cycle only, or the slope only. A gate is an on/off pattern
+    known over the horizon that multiplies the target. A static code is constant per series and
+    target-encoded.
     """
+    # A quarter of training batches have no true driver. Every known row is a decoy.
+    if n_known is None and n_decoy is None and rng.random() < 0.25:
+        n_known = 0
+        n_decoy = int(rng.choice((1, 2)))
     if n_known is None:
         n_known = int(rng.choice((1, 1, 2, 3)))
     if n_decoy is None:
@@ -135,10 +192,14 @@ def make_exogenous_batch(
     contexts, knowns, futures = [], [], []
     for _ in range(batch):
         open_hours = int(rng.integers(10, 20))
-        shared = calendar(length, float(rng.uniform(0, 2 * np.pi)), float(rng.uniform(0, 2 * np.pi)))
+        weekly_phase = float(rng.uniform(0, 2 * np.pi))
+        daily, weekly = seasonal_parts(length, float(rng.uniform(0, 2 * np.pi)), weekly_phase)
+        shared = daily + weekly
+        series_trend = trend if trend is not None else bool(rng.random() < 0.5)
+        trend_line = float(rng.normal(0, 0.0015)) * time if series_trend else np.zeros(length)
         driver = walk(rng, length, 0.25)
         own = walk(rng, length, 0.12)
-        target = np.tanh(driver) + shared + own
+        target = np.tanh(driver) + shared + trend_line + own
         if static:
             code = float(rng.integers(0, 6))
             target = target + (code - 2.5) * 0.4
@@ -149,8 +210,12 @@ def make_exogenous_batch(
             lag_k = int(rng.integers(0, 6))
             src = driver if lag_k == 0 else lag(driver, lag_k)
             rows.append(observe(src + shared, float(rng.uniform(0.05, 0.45)), rng))
+        kinds = ("both", "daily", "trend") if series_trend else ("both", "daily")
         for _view in range(n_decoy):
-            rows.append(shared + 0.35 * walk(rng, length, 0.25))
+            kind = decoy_kind if decoy_kind is not None else str(rng.choice(kinds))
+            if kind == "trend" and not series_trend:
+                kind = "both"
+            rows.append(_decoy_row(kind, daily, weekly, weekly_phase, trend_line, rng))
         if gate:
             open_ = ((time % 24) < open_hours).astype(np.float64)
             target = target * open_
@@ -164,7 +229,8 @@ def make_exogenous_batch(
         knowns.append(np.stack(rows))
     known = torch.tensor(np.stack(knowns), dtype=torch.float32, device=device)
     marks = "".join(part for part, enabled in ((" gate", gate), (" static", static), (" rect", nonnegative)) if enabled)
-    tag = f"exogenous {n_known}+{n_decoy} h{horizon}{marks}"
+    label = decoy_kind or "mixed"
+    tag = f"exogenous {n_known}+{n_decoy} {label} h{horizon}{marks}"
     return pack(contexts, False, device), known, None, pack(futures, False, device), tag
 
 

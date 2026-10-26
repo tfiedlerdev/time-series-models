@@ -46,6 +46,10 @@ def train(args: argparse.Namespace) -> None:
     device = resolve_device(args.device)
     run = open_run(args, device)
     tracker = Tracker(run)
+    completed = 0
+    committed = False
+    stopped = False
+    exit_code = 0
     try:
         forecaster = TimestralForecaster.from_pretrained("mistralai/Timestral-5M", device=device)
         model = forecaster.model
@@ -56,6 +60,21 @@ def train(args: argparse.Namespace) -> None:
         before = evaluate(forecaster, args.eval_series, args.eval_seed)
         print_scores("before", before)
         tracker.log_eval("before", before)
+
+        def commit(steps: int) -> None:
+            nonlocal committed
+            if committed:
+                return
+            output = Path(args.output)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            torch.save({"model": model.state_dict(), "steps": steps}, output)
+            after = evaluate(forecaster, args.eval_series, args.eval_seed)
+            print_scores("after", after)
+            print(f"saved {output}", flush=True)
+            tracker.log_eval("after", after)
+            tracker.log_improvement(before, after, steps)
+            log_checkpoint(run, output, steps, before, after, interrupted=steps < args.steps)
+            committed = True
 
         for step in range(args.steps):
             lr = learning_rate(step, args.steps, args.lr)
@@ -88,20 +107,27 @@ def train(args: argparse.Namespace) -> None:
             ]
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
+            completed = step + 1
             tracker.log_loss(step, parts, overall, lr)
             if step % args.log_every == 0 or step + 1 == args.steps:
                 tags = ",".join(sorted({sample[4] for sample in samples}))
                 print(f"step {step:5d}  {tags:<22}  loss {overall:.4f}", flush=True)
 
-        output = Path(args.output)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({"model": model.state_dict(), "steps": args.steps}, output)
-        after = evaluate(forecaster, args.eval_series, args.eval_seed)
-        print_scores("after", after)
-        print(f"saved {output}", flush=True)
-        tracker.log_eval("after", after)
-        tracker.log_improvement(before, after, args.steps)
-        log_checkpoint(run, output, args.steps, before, after)
+        commit(completed)
+    except KeyboardInterrupt:
+        stopped = True
+        print(f"\ninterrupted after step {completed} of {args.steps}", flush=True)
+        exit_code = 130
+        if completed and not committed:
+            print("Saving the checkpoint and running the eval. Interrupt again to skip that.", flush=True)
+            try:
+                commit(completed)
+                exit_code = 0
+            except KeyboardInterrupt:
+                print("Skipped the remaining save.", flush=True)
     finally:
         if run is not None:
-            run.finish()
+            run.summary["completed_steps"] = completed
+            if stopped and completed < args.steps:
+                run.summary["interrupted"] = True
+            run.finish(exit_code)

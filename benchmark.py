@@ -9,6 +9,7 @@ GIFT-Eval and TIME read data/<name> in this repo. fev-bench downloads its tasks.
 
 Examples:
   uv run python benchmark.py --size 5M --benchmarks fev --tasks world_tourism
+  uv run python benchmark.py --size 5M --benchmarks fev --only-cached-baseline
   hf download Salesforce/GiftEval --repo-type dataset --local-dir data/gift-eval
   hf download Real-TSF/TIME --repo-type dataset --local-dir data/time
 """
@@ -33,6 +34,11 @@ def main() -> None:
     parser.add_argument("--checkpoint", type=Path, help="Local weights instead of the W&B artifact. Skips lineage.")
     parser.add_argument("--benchmarks", default="fev,gift,time", help="Comma-separated: fev, gift, time.")
     parser.add_argument("--tasks", help="Comma-separated task names. A task matches when its name contains one of them.")
+    parser.add_argument(
+        "--only-cached-baseline",
+        action="store_true",
+        help="Keep tasks that already have a pretrained baseline, then score the checkpoint only where its own cache is missing.",
+    )
     parser.add_argument("--limit", type=int, help="Run only the first N tasks of each benchmark, after filtering.")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--device", default="cpu", help="cpu or cuda. MPS cannot run the float64 scaler.")
@@ -62,6 +68,10 @@ def main() -> None:
         jobs.append((name, tasks, storage))
     if not jobs:
         raise SystemExit(1)
+    if args.only_cached_baseline:
+        jobs = _with_cached_baselines(args, jobs)
+        if not jobs:
+            raise SystemExit("No selected tasks have a cached baseline.")
 
     run = open_run(args)
     try:
@@ -157,6 +167,16 @@ def _prepare(name: str, args, filters):
     if not selected:
         return None, None, f"{name}: no tasks matched."
     return selected, storage, None
+
+
+def _with_cached_baselines(args, jobs):
+    kept = []
+    for name, tasks, storage in jobs:
+        ready = [task for task in tasks if read_result(_path(args.size, name, "baseline", task.name)) is not None]
+        print(f"{name}: {len(ready)} of {len(tasks)} tasks have a cached baseline", flush=True)
+        if ready:
+            kept.append((name, ready, storage))
+    return kept
 
 
 def _select(tasks, filters, limit):

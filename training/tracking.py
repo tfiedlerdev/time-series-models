@@ -6,7 +6,17 @@ from pathlib import Path
 import torch
 import wandb
 
-from training.schedule import CONTEXT_LEN, COUNTS, EVAL_TASKS, HORIZON, LONG_CONTEXT, TASK_P, TASKS, warmup_steps
+from training.schedule import (
+    CONTEXT_LEN,
+    COUNT_P,
+    COUNTS,
+    EVAL_TASKS,
+    HORIZON,
+    LONG_CONTEXT,
+    TASK_P,
+    TASKS,
+    warmup_steps,
+)
 
 
 def run_notes(args: argparse.Namespace) -> str:
@@ -27,14 +37,21 @@ def run_notes(args: argparse.Namespace) -> str:
         f"Peak AdamW learning rate {lr}, linear warmup over the first {warmup_steps(args.steps)} steps, "
         "then cosine decay to a tenth of the peak, weight decay 0, full model. "
         f"One task is drawn per series: {shares}. "
-        "The pooling count is drawn from 0, 1, 2, 4, 8, 16, 32, and 64. "
-        "Zero covariates is an ordinary forecast of the same series. "
-        "Above zero, half the batches also append 1–8 unrelated known-future series, and the "
-        "label stays the clean signal. "
-        "Exogenous batches forecast a series driven by one latent walk plus a shared calendar. "
-        "Some known rows are noisy readings of that walk. One or two others share the daily and "
-        "weekly cycle and carry an independent walk, already in the context. Half also use a "
-        "horizon of 168. Some are nonnegative, some are multiplied by a known on/off pattern, "
+        "The pooling count is drawn from 0, 1, 2, 4, 8, 16, 32, and 64, with most of the mass "
+        "on 1 through 16 and a thin tail on 32 and 64. "
+        "Zero known views is an ordinary forecast of the same series. "
+        "Half of the pooling batches hold a pool of 20 views when the count is 16 or below, and 64 "
+        "when it is 32 or 64, and reveal only the drawn count over the horizon; "
+        "the other views stop at the origin. "
+        "On the other half, above zero, half the batches also append 1–8 unrelated known-future series, "
+        "and the label stays the clean signal. "
+        "Exogenous batches forecast a series driven by one latent walk plus a shared calendar, "
+        "and half of them also carry a slope. "
+        "Some known rows are noisy readings of that walk. Decoy rows share one piece and differ "
+        "on the rest: both cycles, the daily cycle with a different weekly cycle, or the slope "
+        "with a different residual. The mismatch is already in the context. A quarter of the "
+        "batches have no true reading, only those decoys. Half also use a horizon of 168. "
+        "Some are nonnegative, some are multiplied by a known on/off pattern, "
         "and some carry a constant target-encoded category. "
         "Past batches add lagged measurements that end at the forecast origin. "
         "History-only batches use a random walk, a two-period seasonal series, or a trend plus "
@@ -119,7 +136,7 @@ def open_run(args: argparse.Namespace, device: torch.device) -> wandb.Run | None
             "context_len": CONTEXT_LEN,
             "long_context": LONG_CONTEXT,
             "horizon": HORIZON,
-            "counts": list(COUNTS),
+            "counts": dict(zip(COUNTS, COUNT_P)),
             "tasks": dict(zip(TASKS, TASK_P)),
             "device": str(device),
         },
@@ -128,15 +145,27 @@ def open_run(args: argparse.Namespace, device: torch.device) -> wandb.Run | None
     return run
 
 
-def log_checkpoint(run: wandb.Run | None, path: Path, steps: int, before: dict[str, float], after: dict[str, float]) -> None:
+def log_checkpoint(
+    run: wandb.Run | None,
+    path: Path,
+    steps: int,
+    before: dict[str, float],
+    after: dict[str, float],
+    *,
+    interrupted: bool = False,
+) -> None:
     if run is None:
         return
+    # A partial run keeps its own alias. Promoting it to latest would make the next
+    # benchmark score a model that stopped early.
+    aliases = ["interrupted"] if interrupted else ["latest", "pool-mix"]
     artifact = wandb.Artifact(
         "timestral-5m-pool-mix",
         type="model",
         description="Timestral-5M after the mixed pooling and replay fine-tune.",
         metadata={
             "steps": steps,
+            "interrupted": interrupted,
             "base_model": "mistralai/Timestral-5M",
             "scores": {
                 name: {
@@ -149,4 +178,4 @@ def log_checkpoint(run: wandb.Run | None, path: Path, steps: int, before: dict[s
         },
     )
     artifact.add_file(str(path))
-    run.log_artifact(artifact, aliases=["latest", "pool-mix"])
+    run.log_artifact(artifact, aliases=aliases)
