@@ -8,6 +8,7 @@ import torch
 from timestral import TimestralForecaster
 
 from training.batches import next_batch
+from training.data_config import DEFAULT_DATA_CONFIG, DataConfig
 from training.eval import evaluate, pinball_loss, print_scores
 from training.schedule import learning_rate
 from training.tracking import Tracker, log_checkpoint, open_run
@@ -43,6 +44,10 @@ def _cat_samples(group: list[tuple]) -> tuple[torch.Tensor, torch.Tensor | None,
 
 
 def train(args: argparse.Namespace) -> None:
+    if not getattr(args, "data_config", None):
+        args.data_config = str(DEFAULT_DATA_CONFIG)
+    if getattr(args, "data", None) is None:
+        args.data = DataConfig.load(args.data_config)
     device = resolve_device(args.device)
     run = open_run(args, device)
     tracker = Tracker(run)
@@ -80,7 +85,7 @@ def train(args: argparse.Namespace) -> None:
             lr = learning_rate(step, args.steps, args.lr)
             for group in optimizer.param_groups:
                 group["lr"] = lr
-            samples = [next_batch(rng, 1, device) for _ in range(args.batch_size)]
+            samples = [next_batch(rng, 1, device, args.data) for _ in range(args.batch_size)]
             groups: dict[tuple, list] = {}
             for sample in samples:
                 groups.setdefault(_batch_key(sample), []).append(sample)

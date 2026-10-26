@@ -21,16 +21,27 @@ covariate.
 The model's scaler uses float64, which Apple MPS cannot run. On a Mac this script
 uses the CPU. A CUDA machine, including a DGX Spark, is used when one is present.
 
+The mixture is `configs/data.yaml`. A null task is left out, and each task's share
+is its weight divided by the sum of the weights.
+
     uv run python -m training
+    uv run python -m training --data-config configs/data.yaml
 """
 
 import argparse
 
+from training.data_config import DEFAULT_DATA_CONFIG, DataConfig
 from training.fit import train
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument(
+        "--data-config",
+        type=str,
+        default=str(DEFAULT_DATA_CONFIG),
+        help="YAML mixture. A null task is left out. Shares are weight / sum(weights).",
+    )
     parser.add_argument("--steps", type=int, default=6000)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument(
@@ -48,7 +59,9 @@ def main() -> None:
     parser.add_argument("--wandb-project", default="time-series-models")
     parser.add_argument("--wandb-entity", default=None, help="W&B team or user. Defaults to the logged-in entity.")
     parser.add_argument("--no-wandb", action="store_true", help="Skip the W&B run and artifact upload.")
-    train(parser.parse_args())
+    args = parser.parse_args()
+    args.data = DataConfig.load(args.data_config)
+    train(args)
 
 
 if __name__ == "__main__":

@@ -6,22 +6,15 @@ from pathlib import Path
 import torch
 import wandb
 
-from training.schedule import (
-    CONTEXT_LEN,
-    COUNT_P,
-    COUNTS,
-    EVAL_TASKS,
-    HORIZON,
-    LONG_CONTEXT,
-    TASK_P,
-    TASKS,
-    warmup_steps,
-)
+from training.data_config import DataConfig
+from training.schedule import EVAL_TASKS, warmup_steps
 
 
 def run_notes(args: argparse.Namespace) -> str:
     """What distinguishes this fine-tune from the pooling-only run."""
-    shares = ", ".join(f"{name} {weight:.0%}" for name, weight in zip(TASKS, TASK_P))
+    data: DataConfig = args.data
+    shares = data.shares()
+    share_text = ", ".join(f"{name} {share:.0%}" for name, share in shares.items())
     lr = f"{args.lr:.0e}".replace("e-0", "e-").replace("e+0", "e+")
     return (
         "Fine-tune of mistralai/Timestral-5M that pools many noisy known-future views of one "
@@ -31,12 +24,12 @@ def run_notes(args: argparse.Namespace) -> str:
         "Error at 64 views fell from 0.37 to 0.25. History-only error on a random walk rose "
         "from about 1.68 to 2.06, because that process never appeared and every batch rewarded "
         "trusting the covariates.\n\n"
-        f"This run is {args.steps} steps, so pooling receives about {args.steps * TASK_P[0]:.0f} updates "
-        f"and the exogenous task about {args.steps * TASK_P[2]:.0f}. "
+        f"This run is {args.steps} steps, so pooling receives about {args.steps * shares.get('pool', 0):.0f} updates "
+        f"and the exogenous task about {args.steps * shares.get('exogenous', 0):.0f}. "
         f"Each update draws {args.batch_size} series from independent tasks and averages their gradients. "
         f"Peak AdamW learning rate {lr}, linear warmup over the first {warmup_steps(args.steps)} steps, "
         "then cosine decay to a tenth of the peak, weight decay 0, full model. "
-        f"One task is drawn per series: {shares}. "
+        f"Data config {args.data_config}. One task is drawn per series: {share_text}. "
         "The pooling count is drawn from 0, 1, 2, 4, 8, 16, 32, and 64, with most of the mass "
         "on 1 through 16 and a thin tail on 32 and 64. "
         "Zero known views is an ordinary forecast of the same series. "
@@ -61,7 +54,8 @@ def run_notes(args: argparse.Namespace) -> str:
         "Categorical batches use one target-encoded known covariate, either quantile bins of "
         "the clean signal or a random code. "
         "The loss is pinball on the model's 21 quantile levels. "
-        f"Context {CONTEXT_LEN}, horizon {HORIZON}, except where a task says otherwise."
+        f"Context {data.context_len}, long context {data.long_context}, "
+        f"horizon {data.horizon}, exogenous horizon {data.exo_horizon}."
     )
 
 
@@ -133,11 +127,9 @@ def open_run(args: argparse.Namespace, device: torch.device) -> wandb.Run | None
             "seed": args.seed,
             "eval_seed": args.eval_seed,
             "eval_series": args.eval_series,
-            "context_len": CONTEXT_LEN,
-            "long_context": LONG_CONTEXT,
-            "horizon": HORIZON,
-            "counts": dict(zip(COUNTS, COUNT_P)),
-            "tasks": dict(zip(TASKS, TASK_P)),
+            "data_config": str(args.data_config),
+            "data": args.data.model_dump(mode="json"),
+            "data_shares": args.data.shares(),
             "device": str(device),
         },
     )
