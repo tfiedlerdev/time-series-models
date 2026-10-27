@@ -13,7 +13,9 @@ from training.batches import (
     make_pool_batch,
 )
 from training.schedule import CONTEXT_LEN, EVAL_TASKS, HISTORY_KINDS, HORIZON, LONG_CONTEXT
-from training.series import make_covariate, make_signal
+from training.data_config import GraphConfig
+from training.graph import draw_graph, graph_rows
+from training.series import make_covariate, make_signal, pack
 
 # The view_curve.py figure, logged at a few counts. That script sweeps every count.
 VIEW_COUNTS = (0, 1, 8, 32, 64)
@@ -177,7 +179,29 @@ def evaluate(forecaster: TimestralForecaster, n_series: int, seed: int) -> dict[
         batches = [make_categorical_batch(rng, 1, device, mode=mode) for _ in range(n_series)]
         scores[f"categorical/{mode}"] = _median_mae(forecaster, batches)
     scores.update(view_curve(forecaster, n_series, seed + 10_000))
+    scores.update(graph(forecaster, n_series, seed + 60_000))
     return scores
+
+
+def graph(forecaster: TimestralForecaster, n_series: int, seed: int) -> dict[str, float]:
+    """Covariate graphs as drawn, with every covariate known whole, and with none."""
+    rng = np.random.default_rng(seed)
+    device = forecaster.device
+    cfg = GraphConfig(weight=1)
+    cells: dict[str, list[tuple]] = {"graph/kept": [], "graph/all": [], "graph/none": []}
+    for _ in range(n_series):
+        draw = draw_graph(rng, cfg, CONTEXT_LEN, HORIZON)
+        context = pack([draw.target[:CONTEXT_LEN]], False, device)
+        future = pack([draw.target[CONTEXT_LEN:]], False, device)
+        known, past = graph_rows(draw, CONTEXT_LEN)
+        cells["graph/kept"].append((context, _tensor(known, device), _tensor(past, device), future, ""))
+        cells["graph/all"].append((context, _tensor(draw.nodes, device), None, future, ""))
+        cells["graph/none"].append((context, None, None, future, ""))
+    return {name: _median_mae(forecaster, batches) for name, batches in cells.items()}
+
+
+def _tensor(rows: np.ndarray | None, device: torch.device) -> torch.Tensor | None:
+    return None if rows is None else torch.tensor(rows[None], dtype=torch.float32, device=device)
 
 
 def view_pool(rng: np.random.Generator, n_views: int) -> tuple[np.ndarray, np.ndarray]:

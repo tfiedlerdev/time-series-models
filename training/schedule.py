@@ -38,6 +38,9 @@ EVAL_TASKS = (
     "long/walk",
     "categorical/bins",
     "categorical/random",
+    "graph/kept",
+    "graph/all",
+    "graph/none",
 )
 
 
