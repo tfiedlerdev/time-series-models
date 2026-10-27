@@ -54,10 +54,121 @@ def make_signal(rng: np.random.Generator, length: int) -> np.ndarray:
     return signal
 
 
+PERIODS = (4, 7, 12, 24, 48, 52, 96, 168, 288, 336, 365)
+FEATURES = 64
+
+
+def _random_features(rng: np.random.Generator, time: np.ndarray, frequencies: np.ndarray) -> np.ndarray:
+    phases = rng.uniform(0, 2 * np.pi, frequencies.shape[0])
+    weights = rng.normal(size=frequencies.shape[0])
+    return np.sqrt(2.0 / frequencies.shape[0]) * np.cos(np.outer(time, frequencies) + phases) @ weights
+
+
+def _periodic(rng: np.random.Generator, time: np.ndarray, period: float, scale: float) -> np.ndarray:
+    """Draw with covariance exp(-2 sin^2(pi d / period) / scale^2), from its Fourier series."""
+    grid = np.arange(256) / 256
+    spectrum = np.clip(np.fft.rfft(np.exp(-2 * np.sin(np.pi * grid) ** 2 / scale**2)).real / 256, 0, None)
+    spectrum[1:] *= 2
+    harmonics = np.arange(spectrum.shape[0])[:24]
+    amplitude = np.sqrt(spectrum[:24])
+    angle = 2 * np.pi * np.outer(time, harmonics) / period
+    return np.cos(angle) @ (amplitude * rng.normal(size=24)) + np.sin(angle) @ (amplitude * rng.normal(size=24))
+
+
+def _kernel_draw(rng: np.random.Generator, time: np.ndarray, length: int) -> np.ndarray:
+    """One independent draw from a kernel in the KernelSynth bank. Lengthscales are in units of the series."""
+    choice = int(rng.integers(0, 6))
+    if choice == 0:
+        return _periodic(rng, time, float(rng.choice(PERIODS)), float(rng.choice((0.5, 1.0, 2.0))))
+    if choice == 1:
+        center = float(rng.uniform(0, 1)) * length
+        return float(rng.normal(0, float(rng.choice((0.5, 2.0, 5.0))))) * (time - center) / length
+    if choice == 2:
+        scale = float(rng.choice((0.01, 0.05, 0.1, 0.5, 1.0))) * length
+        return _random_features(rng, time, rng.normal(0, 1 / scale, FEATURES))
+    if choice == 3:
+        alpha = float(rng.choice((0.1, 1.0, 10.0)))
+        scale = float(rng.choice((0.05, 0.2, 1.0))) * length
+        precision = rng.gamma(alpha, 1 / alpha, FEATURES)
+        return _random_features(rng, time, rng.normal(0, 1, FEATURES) * np.sqrt(precision) / scale)
+    if choice == 4:
+        return rng.normal(0, float(rng.choice((0.05, 0.2))), length)
+    return np.full(length, float(rng.normal(0, 1)))
+
+
+def kernel_synth(rng: np.random.Generator, length: int) -> np.ndarray:
+    """A random sum and product of one to five kernels, after the KernelSynth recipe of Chronos.
+
+    Independent draws are added for a sum kernel and multiplied for a product kernel,
+    which has the same covariance as the exact Gaussian-process draw and costs no
+    Cholesky factor, so any length is cheap.
+    """
+    time = np.arange(length, dtype=np.float64)
+    draw = _kernel_draw(rng, time, length)
+    for _ in range(int(rng.integers(0, 5))):
+        other = _kernel_draw(rng, time, length)
+        draw = draw + other if rng.random() < 0.5 else draw * other
+    spread = float(np.std(draw))
+    if spread < 1e-6:
+        draw = draw + rng.normal(0, 1, length)
+        spread = float(np.std(draw))
+    return (draw - draw.mean()) / spread + float(rng.normal(0, 1))
+
+
+def _seasonal(rng: np.random.Generator, time: np.ndarray) -> np.ndarray:
+    out = np.zeros(time.shape[0])
+    for period in rng.choice(PERIODS, size=int(rng.integers(1, 4)), replace=False):
+        amplitude = float(rng.uniform(0.2, 2.0))
+        for harmonic in range(1, int(rng.integers(1, 4)) + 1):
+            phase = float(rng.uniform(0, 2 * np.pi))
+            out += amplitude / harmonic * np.sin(2 * np.pi * harmonic * time / float(period) + phase)
+    return out
+
+
+def _ar(rng: np.random.Generator, length: int, phi: float, scale: float) -> np.ndarray:
+    innov = rng.normal(0.0, scale, length)
+    out = np.empty(length)
+    out[0] = innov[0]
+    for index in range(1, length):
+        out[index] = phi * out[index - 1] + innov[index]
+    return out
+
+
+def composite(rng: np.random.Generator, length: int) -> np.ndarray:
+    """Seasons, a trend, an AR process, level shifts, and spikes, combined additively or multiplicatively."""
+    time = np.arange(length)
+    seasonal = _seasonal(rng, time) if rng.random() < 0.8 else np.zeros(length)
+    trend = float(rng.normal(0, 2.0)) * time / length if rng.random() < 0.5 else np.zeros(length)
+    noise = _ar(rng, length, float(rng.uniform(0.0, 0.99)), float(rng.uniform(0.05, 0.5)))
+    shifts = np.zeros(length)
+    for start in rng.integers(0, length, size=int(rng.poisson(0.7))):
+        shifts[start:] += float(rng.normal(0, 1.0))
+    body = seasonal + trend + noise + shifts
+    if rng.random() < 0.3:
+        body = np.exp(0.4 * (body - body.mean())) * float(rng.uniform(1, 10))
+    spikes = rng.random(length) < float(rng.choice((0.0, 0.002, 0.01)))
+    body[spikes] += rng.normal(0, 4 * float(np.std(body)) + 1e-3, int(spikes.sum()))
+    return body
+
+
+def intermittent(rng: np.random.Generator, length: int) -> np.ndarray:
+    """Counts whose rate follows a season and a slow walk. Low rates give mostly zeros."""
+    time = np.arange(length)
+    log_rate = 0.5 * _seasonal(rng, time) + _ar(rng, length, 0.98, float(rng.uniform(0.02, 0.15)))
+    rate = float(rng.uniform(0.05, 5.0)) * np.exp(log_rate - log_rate.mean())
+    return rng.poisson(rate).astype(np.float64)
+
+
 def make_series(rng: np.random.Generator, length: int, kind: str) -> np.ndarray:
     """A series whose own future is the forecast target."""
     if kind == "train":
         return make_signal(rng, length)
+    if kind == "kernel":
+        return kernel_synth(rng, length)
+    if kind == "composite":
+        return composite(rng, length)
+    if kind == "intermittent":
+        return intermittent(rng, length)
     if kind == "walk":
         return np.cumsum(rng.normal(0, 0.4, length))
     if kind == "season":
