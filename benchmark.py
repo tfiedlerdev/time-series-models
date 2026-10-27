@@ -47,6 +47,8 @@ def main() -> None:
     parser.add_argument("--wandb-project", default="time-series-models")
     parser.add_argument("--wandb-entity", default=None, help="W&B team or user. Defaults to the logged-in entity.")
     parser.add_argument("--no-wandb", action="store_true", help="Skip the W&B run. With no --checkpoint, score the pretrained model only.")
+    parser.add_argument("--run-name", help="W&B run name. Defaults to benchmark-<size>.")
+    parser.add_argument("--tags", default="", help="Extra W&B tags, comma-separated.")
     args = parser.parse_args()
     if args.checkpoint is not None and not args.checkpoint.exists():
         raise SystemExit(f"Checkpoint not found: {args.checkpoint}")

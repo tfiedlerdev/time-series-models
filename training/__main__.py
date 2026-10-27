@@ -59,6 +59,12 @@ def main() -> None:
     parser.add_argument("--wandb-project", default="time-series-models")
     parser.add_argument("--wandb-entity", default=None, help="W&B team or user. Defaults to the logged-in entity.")
     parser.add_argument("--no-wandb", action="store_true", help="Skip the W&B run and artifact upload.")
+    parser.add_argument(
+        "--run-name",
+        default="pool-mix-5m",
+        help="W&B run name. Also an alias on the model artifact, so a benchmark can ask for it by name.",
+    )
+    parser.add_argument("--tags", default="", help="Extra W&B tags, comma-separated.")
     args = parser.parse_args()
     args.data = DataConfig.load(args.data_config)
     train(args)
