@@ -9,13 +9,24 @@ from training.data_config import (
     DataConfig,
     ExogenousConfig,
     HistoryConfig,
+    LeadConfig,
     LongConfig,
     MultiConfig,
     PastConfig,
     PoolConfig,
 )
 from training.schedule import CONTEXT_LEN, EXO_HORIZON, HORIZON
-from training.series import lag, make_covariate, make_series, make_signal, observe, pack, seasonal_parts, walk
+from training.series import (
+    lag,
+    make_covariate,
+    make_series,
+    make_signal,
+    observe,
+    pack,
+    seasonal_parts,
+    signed_power,
+    walk,
+)
 
 
 def make_pool_batch(
@@ -295,6 +306,59 @@ def make_past_batch(
     return pack(contexts, False, device), None, past, pack(futures, False, device), tag
 
 
+def _response(rng: np.random.Generator, values: np.ndarray) -> np.ndarray:
+    kind = int(rng.integers(0, 3))
+    if kind == 0:
+        return float(rng.uniform(1.0, 2.5)) * np.tanh(values / float(rng.uniform(0.5, 2.0)))
+    if kind == 1:
+        return signed_power(values, float(rng.uniform(0.5, 1.8)))
+    return float(rng.uniform(0.5, 1.5)) * float(rng.choice((-1.0, 1.0))) * values
+
+
+def make_lead_batch(
+    rng: np.random.Generator,
+    batch: int,
+    device: torch.device,
+    delay: int | None = None,
+    n_decoy: int | None = None,
+    calendar: bool | None = None,
+    config: LeadConfig | None = None,
+    context_len: int = CONTEXT_LEN,
+    horizon: int = HORIZON,
+) -> tuple[torch.Tensor, None, torch.Tensor, torch.Tensor, str]:
+    """Target follows a measurement `delay` steps earlier. The measurement stops at the origin.
+
+    Row 0 of the past covariates is the measurement. Any further rows are lagged readings of
+    the target, which carry nothing the target's own history does not.
+    """
+    cfg = config or LeadConfig(weight=1)
+    if delay is None:
+        delay = int(rng.integers(cfg.delay_min, cfg.delay_max + 1))
+    if n_decoy is None:
+        n_decoy = cfg.decoy_counts.draw(rng)
+    if calendar is None:
+        calendar = bool(rng.random() < cfg.calendar_probability)
+    length = context_len + horizon
+    contexts, pasts, futures = [], [], []
+    for _ in range(batch):
+        measured = walk(rng, length + delay, 0.25)
+        target = _response(rng, measured[:length]) + walk(rng, length, cfg.own_scale)
+        if calendar:
+            daily, weekly = seasonal_parts(length, float(rng.uniform(0, 2 * np.pi)), float(rng.uniform(0, 2 * np.pi)))
+            target = target + daily + weekly
+        reading = observe(measured[delay:], float(rng.uniform(cfg.noise_min, cfg.noise_max)), rng)
+        rows = [reading[:context_len]]
+        for _decoy in range(n_decoy):
+            lagged = lag(target, int(rng.integers(cfg.decoy_lag_min, cfg.decoy_lag_max + 1)))
+            rows.append(observe(lagged, float(rng.uniform(cfg.noise_min, cfg.noise_max)), rng)[:context_len])
+        contexts.append(target[:context_len])
+        futures.append(target[context_len:])
+        pasts.append(np.stack(rows))
+    past = torch.tensor(np.stack(pasts), dtype=torch.float32, device=device)
+    tag = f"lead d{delay} +{n_decoy}{' cal' if calendar else ''}"
+    return pack(contexts, False, device), None, past, pack(futures, False, device), tag
+
+
 def next_batch(
     rng: np.random.Generator,
     batch: int,
@@ -344,6 +408,10 @@ def next_batch(
             rng, batch, kind, cfg.long_context, device, horizon=cfg.horizon
         )
         tag = "long" + tag.removeprefix("history")
+    elif task == "lead":
+        context, known, past, future, tag = make_lead_batch(
+            rng, batch, device, config=cfg.lead, context_len=cfg.context_len, horizon=cfg.horizon
+        )
     else:
         context, known, past, future, tag = make_categorical_batch(
             rng, batch, device, config=cfg.categorical, context_len=cfg.context_len, horizon=cfg.horizon

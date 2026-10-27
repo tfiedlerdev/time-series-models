@@ -148,6 +148,36 @@ class PastConfig(TaskConfig):
         return self
 
 
+class LeadConfig(TaskConfig):
+    """A target that follows an earlier measurement, which is known only up to the origin.
+
+    The target is a nonlinear function of the measurement `delay` steps before, plus a walk
+    of its own and sometimes a calendar. The measurement's recent values fix the first
+    `delay` steps of the horizon and nothing after. Decoy rows are lagged readings of the
+    target itself, which follow it instead of leading it.
+    """
+
+    delay_min: int = Field(default=4, ge=1)
+    delay_max: int = Field(default=48, ge=1)
+    noise_min: float = Field(default=0.05, ge=0)
+    noise_max: float = Field(default=0.4, gt=0)
+    own_scale: float = Field(default=0.12, ge=0)
+    calendar_probability: float = Field(default=0.5, ge=0, le=1)
+    decoy_counts: Weighted = Field(default_factory=lambda: Weighted(values=[0, 1, 2], weights=[2, 1, 1]))
+    decoy_lag_min: int = Field(default=1, ge=1)
+    decoy_lag_max: int = Field(default=12, ge=1)
+
+    @model_validator(mode="after")
+    def _ranges(self) -> "LeadConfig":
+        if self.delay_max < self.delay_min:
+            raise ValueError("delay_max is below delay_min")
+        if self.noise_max < self.noise_min:
+            raise ValueError("noise_max is below noise_min")
+        if self.decoy_lag_max < self.decoy_lag_min:
+            raise ValueError("decoy_lag_max is below decoy_lag_min")
+        return self
+
+
 class MultiConfig(TaskConfig):
     """Several series that share one latent factor, forecast jointly."""
 
@@ -212,13 +242,14 @@ class DataConfig(BaseModel):
     multi: MultiConfig | None = None
     long: LongConfig | None = None
     categorical: CategoricalConfig | None = None
+    lead: LeadConfig | None = None
 
     @classmethod
     def load(cls, path: Path | str = DEFAULT_DATA_CONFIG) -> "DataConfig":
         return parse_yaml_file_as(cls, path)
 
     def tasks(self) -> list[tuple[str, TaskConfig]]:
-        names = ("pool", "history", "exogenous", "past", "multi", "long", "categorical")
+        names = ("pool", "history", "exogenous", "past", "multi", "long", "categorical", "lead")
         return [(name, getattr(self, name)) for name in names if getattr(self, name) is not None]
 
     @model_validator(mode="after")
