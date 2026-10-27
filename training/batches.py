@@ -15,7 +15,17 @@ from training.data_config import (
     PoolConfig,
 )
 from training.schedule import CONTEXT_LEN, EXO_HORIZON, HORIZON
-from training.series import lag, make_covariate, make_series, make_signal, observe, pack, seasonal_parts, walk
+from training.series import (
+    lag,
+    make_covariate,
+    make_series,
+    make_signal,
+    mask_stretches,
+    observe,
+    pack,
+    seasonal_parts,
+    walk,
+)
 
 
 def make_pool_batch(
@@ -188,6 +198,7 @@ def make_exogenous_batch(
     horizon: int | None = None,
     decoy_kind: str | None = None,
     trend: bool | None = None,
+    mask: bool | None = None,
     config: ExogenousConfig | None = None,
     context_len: int = CONTEXT_LEN,
     short_horizon: int = HORIZON,
@@ -217,6 +228,9 @@ def make_exogenous_batch(
         gate = bool(rng.random() < cfg.gate_probability)
     if static is None:
         static = bool(rng.random() < cfg.static_probability)
+    if mask is None:
+        mask = n_known > 0 and cfg.mask_probability > 0 and bool(rng.random() < cfg.mask_probability)
+    n_stretches = cfg.mask_stretches.draw(rng) if mask else 0
     length = context_len + horizon
     time = np.arange(length)
     contexts, knowns, futures = [], [], []
@@ -240,6 +254,15 @@ def make_exogenous_batch(
             lag_k = int(rng.integers(cfg.lag_min, cfg.lag_max + 1))
             src = driver if lag_k == 0 else lag(driver, lag_k)
             rows.append(observe(src + shared, float(rng.uniform(cfg.noise_min, cfg.noise_max)), rng))
+        if mask and rows:
+            mask_stretches(
+                rows,
+                rng,
+                n_stretches,
+                cfg.mask_gap_probability,
+                max(16, context_len - cfg.mask_switch_before),
+                length - 16,
+            )
         kinds = tuple(cfg.decoy_kinds) if series_trend else tuple(kind for kind in cfg.decoy_kinds if kind != "trend")
         if not kinds:
             kinds = ("both",)
@@ -260,7 +283,8 @@ def make_exogenous_batch(
         futures.append(target[context_len:])
         knowns.append(np.stack(rows))
     known = torch.tensor(np.stack(knowns), dtype=torch.float32, device=device)
-    marks = "".join(part for part, enabled in ((" gate", gate), (" static", static), (" rect", nonnegative)) if enabled)
+    flags = ((" gate", gate), (" static", static), (" rect", nonnegative), (f" mask{n_stretches}", mask))
+    marks = "".join(part for part, enabled in flags if enabled)
     label = decoy_kind or "mixed"
     tag = f"exogenous {n_known}+{n_decoy} {label} h{horizon}{marks}"
     return pack(contexts, False, device), known, None, pack(futures, False, device), tag

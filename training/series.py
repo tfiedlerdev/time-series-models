@@ -87,6 +87,37 @@ def make_covariate(signal: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     return observe(values, float(rng.uniform(0.1, 0.7)), rng)
 
 
+def mask_stretches(
+    rows: list[np.ndarray],
+    rng: np.random.Generator,
+    n_stretches: int,
+    gap_probability: float,
+    switch_from: int,
+    switch_to: int,
+) -> None:
+    """Hide readings in place, one stretch at a time, so a different one is present in each.
+
+    Each stretch keeps one reading and sets the others to NaN; the kept reading changes
+    from one stretch to the next. With a single reading, its stretches alternate between
+    present and missing. A stretch is all missing with `gap_probability`. One boundary
+    always falls in `[switch_from, switch_to)`, so the switch can land near the origin or
+    on the horizon.
+    """
+    length = rows[0].shape[0]
+    grid = np.arange(16, length - 15, 16)
+    first = int(rng.integers(switch_from, switch_to))
+    others = rng.choice(grid[np.abs(grid - first) >= 16], max(0, n_stretches - 2), replace=False)
+    bounds = [0, *sorted({first, *others.tolist()}), length]
+    choices = len(rows) if len(rows) > 1 else 2
+    keep = int(rng.integers(choices))
+    for start, stop in zip(bounds[:-1], bounds[1:]):
+        present = None if rng.random() < gap_probability else keep
+        for index, row in enumerate(rows):
+            if index != present:
+                row[start:stop] = np.nan
+        keep = (keep + 1 + int(rng.integers(choices - 1))) % choices
+
+
 def pack(rows: list[np.ndarray], variates: bool, device: torch.device) -> torch.Tensor:
     tensor = torch.tensor(np.stack(rows), dtype=torch.float32, device=device)
     return tensor if variates else tensor[:, None, :]
