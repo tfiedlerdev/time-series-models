@@ -105,6 +105,15 @@ class ExogenousConfig(TaskConfig):
         default_factory=lambda: Weighted(values=[1, 2, 3], weights=[2, 1, 1])
     )
     decoy_counts: Weighted = Field(default_factory=lambda: Weighted(values=[1, 2], weights=[2, 1]))
+    # A batch that keeps its true reading draws its decoy count from `stack_counts` instead,
+    # with this probability. Zero leaves the mix as it was.
+    stack_probability: float = Field(default=0.0, ge=0, le=1)
+    stack_counts: Weighted = Field(
+        default_factory=lambda: Weighted(
+            values=[0, 1, 2, 3, 4, 6, 8, 10, 12, 14, 16],
+            weights=[0.04, 0.06, 0.06, 0.1, 0.1, 0.12, 0.12, 0.1, 0.1, 0.1, 0.1],
+        )
+    )
     decoy_kinds: list[str] = Field(default_factory=lambda: ["both", "daily", "trend"], min_length=1)
     long_horizon_probability: float = Field(default=0.5, ge=0, le=1)
     trend_probability: float = Field(default=0.5, ge=0, le=1)

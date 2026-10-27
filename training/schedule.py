@@ -38,6 +38,9 @@ EVAL_TASKS = (
     "long/walk",
     "categorical/bins",
     "categorical/random",
+    "stack/1+8",
+    "stack/0+8",
+    "stack/1+16",
 )
 
 
