@@ -10,13 +10,11 @@ The setup, the table, and why the error does not go to zero are in [findings/vie
 
 The aim is a better synthetic data mix: raise that capability without giving up performance on the model's other tasks. That is not a completed result.
 
-Another finished run, a true covariate among decoys, is in [findings/decoy-sweep.md](findings/decoy-sweep.md).
+A true covariate among decoys is in [findings/decoy-sweep.md](findings/decoy-sweep.md). Masking the true exogenous readings on alternating stretches is in [findings/masked-covariates.md](findings/masked-covariates.md).
 
 ## Research idea queue
 
-Two shapes are missing from the synthetic mix. Both are capabilities the pretrained model has, and a fine-tune that never sees them can drop them.
-
-**Masked dependent covariates.** Timestral treats NaN as missing, and the fine-tune never asks it to. Every training series is fully observed. A useful task is the exogenous series with its true readings masked on different stretches: at one time the first reading is present and the second is missing, and later the reverse. The forecast should follow whichever reading is actually there.
+One shape is missing from the synthetic mix. It is a capability the pretrained model has, and a fine-tune that never sees it can drop it.
 
 **A leading measurement that stops at the origin.** The past-only task is a lagged copy of the target itself. What we do not have is a covariate the target follows with a delay. The target is a nonlinear function of a measurement that happened earlier, and that measurement is known only up to the forecast origin. Because of the delay, its recent values still determine the beginning of the horizon, and they say nothing about the steps beyond the delay. The mismatch has to be visible in the context, the same way the exogenous decoys are.
 

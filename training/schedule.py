@@ -38,6 +38,12 @@ EVAL_TASKS = (
     "long/walk",
     "categorical/bins",
     "categorical/random",
+    "masked/1",
+    "masked/1-full",
+    "masked/1-none",
+    "masked/2",
+    "masked/2-full",
+    "masked/2-none",
 )
 
 

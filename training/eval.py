@@ -13,7 +13,7 @@ from training.batches import (
     make_pool_batch,
 )
 from training.schedule import CONTEXT_LEN, EVAL_TASKS, HISTORY_KINDS, HORIZON, LONG_CONTEXT
-from training.series import make_covariate, make_signal
+from training.series import make_covariate, make_signal, mask_stretches
 
 # The view_curve.py figure, logged at a few counts. That script sweeps every count.
 VIEW_COUNTS = (0, 1, 8, 32, 64)
@@ -177,6 +177,43 @@ def evaluate(forecaster: TimestralForecaster, n_series: int, seed: int) -> dict[
         batches = [make_categorical_batch(rng, 1, device, mode=mode) for _ in range(n_series)]
         scores[f"categorical/{mode}"] = _median_mae(forecaster, batches)
     scores.update(view_curve(forecaster, n_series, seed + 10_000))
+    scores.update(masked(forecaster, n_series, seed + 40_000))
+    return scores
+
+
+def masked(forecaster: TimestralForecaster, n_series: int, seed: int) -> dict[str, float]:
+    """True readings hidden on alternating stretches, beside the same series fully seen and with no rows.
+
+    Four stretches, one switch between 128 steps before the origin and the end of the horizon.
+    """
+    rng = np.random.default_rng(seed)
+    device = forecaster.device
+    scores = {}
+    for n_known in (1, 2):
+        full, hidden, none = [], [], []
+        for _ in range(n_series):
+            context, known, past, future, tag = make_exogenous_batch(
+                rng,
+                1,
+                device,
+                n_known=n_known,
+                n_decoy=0,
+                static=False,
+                nonnegative=False,
+                gate=False,
+                horizon=HORIZON,
+                trend=False,
+                mask=False,
+            )
+            rows = list(known[0].cpu().numpy().astype(np.float64))
+            mask_stretches(rows, rng, 4, 0.0, CONTEXT_LEN - 128, CONTEXT_LEN + HORIZON - 16)
+            hidden_known = torch.tensor(np.stack(rows)[None], dtype=torch.float32, device=device)
+            full.append((context, known, past, future, tag))
+            hidden.append((context, hidden_known, past, future, tag))
+            none.append((context, None, past, future, tag))
+        scores[f"masked/{n_known}"] = _median_mae(forecaster, hidden)
+        scores[f"masked/{n_known}-full"] = _median_mae(forecaster, full)
+        scores[f"masked/{n_known}-none"] = _median_mae(forecaster, none)
     return scores
 
 

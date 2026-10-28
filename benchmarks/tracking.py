@@ -22,10 +22,10 @@ def open_run(args) -> wandb.Run | None:
     run = wandb.init(
         project=args.wandb_project,
         entity=args.wandb_entity,
-        name=f"benchmark-{args.size}",
+        name=args.run_name or f"benchmark-{args.size}",
         group="benchmark",
         job_type="benchmark",
-        tags=[f"timestral-{args.size.lower()}", "benchmark"],
+        tags=[f"timestral-{args.size.lower()}", "benchmark", *[tag.strip() for tag in args.tags.split(",") if tag.strip()]],
         save_code=True,
         config={
             "model": SIZES[args.size],

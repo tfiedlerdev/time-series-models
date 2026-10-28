@@ -115,6 +115,14 @@ class ExogenousConfig(TaskConfig):
     lag_max: int = Field(default=5, ge=0)
     noise_min: float = Field(default=0.05, ge=0)
     noise_max: float = Field(default=0.45, gt=0)
+    # With this probability a batch hides its true readings on stretches: each stretch keeps
+    # one reading and masks the others with NaN, and the kept reading changes between
+    # stretches. One switch falls between `mask_switch_before` steps before the origin and
+    # the end of the horizon. Zero leaves the mix as it was.
+    mask_probability: float = Field(default=0.0, ge=0, le=1)
+    mask_stretches: Weighted = Field(default_factory=lambda: Weighted(values=[2, 3, 4, 6]))
+    mask_gap_probability: float = Field(default=0.1, ge=0, le=1)
+    mask_switch_before: int = Field(default=128, ge=0)
 
     @model_validator(mode="after")
     def _ranges(self) -> "ExogenousConfig":
