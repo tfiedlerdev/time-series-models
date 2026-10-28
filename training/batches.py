@@ -14,7 +14,10 @@ from training.data_config import (
     MultiConfig,
     PastConfig,
     PoolConfig,
+    RealConfig,
+    RealCovariateConfig,
 )
+from training.real import draw_covariate_window, draw_window, load_dataset, load_multivariate, pack_window
 from training.schedule import CONTEXT_LEN, EXO_HORIZON, HORIZON
 from training.series import lag, make_covariate, make_series, make_signal, observe, pack, seasonal_parts, walk
 
@@ -313,10 +316,21 @@ def make_distill_batch(
     length = context_len + horizon
     n_past = int(rng.integers(1, cfg.covariate_max + 1)) if rng.random() < cfg.past_probability else 0
     n_known = int(rng.integers(1, cfg.covariate_max + 1)) if rng.random() < cfg.known_probability else 0
+    quantize = rng.random() < cfg.quantize_probability
+    gaps = rng.random() < cfg.gap_probability
     contexts, futures, pasts, knowns = [], [], [], []
     for _ in range(batch):
         series = make_series(rng, length, kind)
-        contexts.append(series[:context_len])
+        if quantize:
+            step = float(np.std(series[:context_len])) * float(rng.uniform(0.02, 0.3)) + 1e-6
+            series = np.round(series / step) * step
+        context = series[:context_len].copy()
+        if gaps:
+            for _ in range(int(rng.integers(1, 5))):
+                width = int(rng.integers(1, max(2, context_len // 8)))
+                start = int(rng.integers(0, context_len - width - 16))
+                context[start : start + width] = np.nan
+        contexts.append(context)
         futures.append(series[context_len:])
         if n_past:
             pasts.append(np.stack([make_series(rng, context_len, str(rng.choice(cfg.kinds))) for _ in range(n_past)]))
@@ -325,7 +339,70 @@ def make_distill_batch(
     past = torch.tensor(np.stack(pasts), dtype=torch.float32, device=device) if pasts else None
     known = torch.tensor(np.stack(knowns), dtype=torch.float32, device=device) if knowns else None
     tag = f"distill {kind} {context_len} h{horizon} past{n_past} known{n_known}"
+    tag += " quantized" * quantize + " gaps" * gaps
     return pack(contexts, False, device), known, past, pack(futures, False, device), tag
+
+
+def make_real_batch(
+    rng: np.random.Generator,
+    device: torch.device,
+    config: RealConfig,
+) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor, str]:
+    """One window of one real series. The label is set in the loop."""
+    while True:
+        name = str(rng.choice(config.datasets))
+        rows, _heldout = load_dataset(name, config.max_series, config.min_context + min(config.horizons.values))
+        if not rows:
+            continue
+        window = draw_window(
+            rng,
+            rows,
+            config.context_lens.draw(rng),
+            config.horizons.values,
+            config.min_context,
+            horizon_weights=config.horizons.weights,
+        )
+        if window is not None:
+            break
+    context, future = pack_window(*window, device)
+    return context, None, None, future, f"real {name} {context.shape[-1]} h{future.shape[-1]}"
+
+
+def make_realcov_batch(
+    rng: np.random.Generator,
+    device: torch.device,
+    config: RealCovariateConfig,
+) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor, str]:
+    """One window of one real variate, with others of the same series as covariates."""
+    while True:
+        name = str(rng.choice(config.datasets))
+        series, _heldout = load_multivariate(name, config.max_series, config.min_context + min(config.horizons.values))
+        if not series:
+            continue
+        window = draw_covariate_window(
+            rng,
+            series,
+            config.context_lens.draw(rng),
+            config.horizons.values,
+            config.min_context,
+            config.max_covariates,
+            finite_future=config.label == "truth",
+            horizon_weights=config.horizons.weights,
+        )
+        if window is not None:
+            break
+    context, future, rows, ahead = window
+    stops = rng.random(rows.shape[0]) < config.past_probability
+    past = torch.tensor(rows[stops][None], dtype=torch.float32, device=device) if stops.any() else None
+    known = (
+        torch.tensor(np.concatenate([rows[~stops], ahead[~stops]], axis=1)[None], dtype=torch.float32, device=device)
+        if (~stops).any()
+        else None
+    )
+    context_t, future_t = pack_window(context, future, device)
+    n_past = int(stops.sum())
+    tag = f"realcov {name} {context.shape[-1]} h{future.shape[-1]} past{n_past} known{rows.shape[0] - n_past}"
+    return context_t, known, past, future_t, tag
 
 
 def next_batch(
@@ -379,6 +456,10 @@ def next_batch(
         tag = "long" + tag.removeprefix("history")
     elif task == "distill":
         context, known, past, future, tag = make_distill_batch(rng, batch, device, config=cfg.distill)
+    elif task == "real":
+        context, known, past, future, tag = make_real_batch(rng, device, cfg.real)
+    elif task == "realcov":
+        context, known, past, future, tag = make_realcov_batch(rng, device, cfg.realcov)
     else:
         context, known, past, future, tag = make_categorical_batch(
             rng, batch, device, config=cfg.categorical, context_len=cfg.context_len, horizon=cfg.horizon

@@ -7,11 +7,14 @@ import numpy as np
 import torch
 from timestral import TimestralForecaster
 
+from benchmarks.model import SIZES
 from training.batches import next_batch
 from training.data_config import DEFAULT_DATA_CONFIG, DataConfig
 from training.eval import evaluate, pinball_loss, print_scores
 from training.schedule import learning_rate
 from training.tracking import Tracker, log_checkpoint, open_run
+
+REPLAY_TASKS = ("distill", "real", "realcov")
 
 
 def resolve_device(name: str) -> torch.device:
@@ -32,17 +35,33 @@ def _batch_key(sample: tuple) -> tuple:
         None if known is None else known.shape[1:],
         None if past is None else past.shape[1:],
         future.shape[1:],
-        sample[4] == "distill",
+        sample[4] if sample[4] in REPLAY_TASKS else None,
     )
 
 
-def _load_teacher(data: DataConfig, device: torch.device) -> TimestralForecaster | None:
-    """The frozen pretrained model, when the distill task takes its labels from it."""
-    if data.distill is None or data.distill.label != "teacher":
-        return None
-    teacher = TimestralForecaster.from_pretrained("mistralai/Timestral-5M", device=device)
-    teacher.model.requires_grad_(False)
-    return teacher
+def _load_teachers(data: DataConfig, device: torch.device) -> dict[str, TimestralForecaster | None]:
+    """For each replay task, the frozen pretrained model that labels it, or None for truth labels."""
+    models: dict[str, TimestralForecaster] = {}
+    teachers: dict[str, TimestralForecaster | None] = {}
+    for task in REPLAY_TASKS:
+        config = getattr(data, task)
+        if config is None or config.label != "teacher":
+            teachers[task] = None
+            continue
+        if config.teacher not in models:
+            model = TimestralForecaster.from_pretrained(SIZES[config.teacher], device=device)
+            model.model.eval()
+            model.model.requires_grad_(False)
+            models[config.teacher] = model
+        teachers[task] = models[config.teacher]
+    return teachers
+
+
+def _observed_std(context: torch.Tensor, observed: torch.Tensor) -> torch.Tensor:
+    """Standard deviation over the observed steps of each row, shaped `(B, V, 1)`."""
+    count = observed.sum(dim=-1, keepdim=True).clamp_min(1)
+    mean = (context * observed).sum(dim=-1, keepdim=True) / count
+    return ((((context - mean) * observed) ** 2).sum(dim=-1, keepdim=True) / count).sqrt()
 
 
 def _cat_samples(group: list[tuple]) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor]:
@@ -70,7 +89,7 @@ def train(args: argparse.Namespace) -> None:
         model = forecaster.model
         model.train()
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.0)
-        teacher = _load_teacher(args.data, device)
+        teachers = _load_teachers(args.data, device)
         rng = np.random.default_rng(args.seed)
         print(f"device {device}", flush=True)
         before = evaluate(forecaster, args.eval_series, args.eval_seed)
@@ -105,22 +124,25 @@ def train(args: argparse.Namespace) -> None:
             overall = 0.0
             for group in groups.values():
                 context, known, past, future = _cat_samples(group)
+                observed = torch.isfinite(context)
+                context = torch.where(observed, context, torch.zeros_like(context))
                 quantiles = forecaster._forecast_raw(
                     context,
-                    torch.ones_like(context, dtype=torch.bool),
+                    observed,
                     future.shape[-1],
                     past_covariates=past,
                     known_covariates=known,
                 )
-                if group[0][4] == "distill":
-                    scale = context.std(dim=-1, keepdim=True).clamp_min(0.1).unsqueeze(-1)
+                if group[0][4] in REPLAY_TASKS:
+                    teacher = teachers[group[0][4]]
+                    scale = _observed_std(context, observed).clamp_min(0.1).unsqueeze(-1)
                     if teacher is None:
                         loss = pinball_loss(quantiles / scale, future / scale[..., 0], forecaster.quantile_levels)
                     else:
                         with torch.no_grad():
                             labels = teacher._forecast_raw(
                                 context,
-                                torch.ones_like(context, dtype=torch.bool),
+                                observed,
                                 future.shape[-1],
                                 past_covariates=past,
                                 known_covariates=known,

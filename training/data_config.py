@@ -10,8 +10,13 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_yaml import parse_yaml_file_as
 
+from benchmarks.model import SIZES
+from training.real_sources import REAL_DATASETS, REAL_MULTIVARIATE
+
 DEFAULT_DATA_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "data.yaml"
-SERIES_KINDS = frozenset({"walk", "season", "trend", "kernel", "composite", "intermittent"})
+SERIES_KINDS = frozenset(
+    {"walk", "season", "trend", "kernel", "composite", "intermittent", "regime", "events", "piecewise", "profile"}
+)
 DISTILL_LABELS = frozenset({"teacher", "truth"})
 DECOY_KINDS = frozenset({"both", "daily", "trend"})
 
@@ -201,11 +206,18 @@ class DistillConfig(TaskConfig):
     those of the frozen pretrained model on the same input, so the update pulls the
     forecast back toward the pretrained one wherever no other task asks for a change.
     With `label: truth` it is the ordinary pinball loss against the series itself.
-    Covariate rows, when drawn, are unrelated generic series.
+    Covariate rows, when drawn, are unrelated generic series. `teacher` is the Timestral
+    size that gives the labels. A larger one pulls the fine-tune toward a forecast it
+    did not have.
+
+    `gap_probability` blanks one to four stretches of the context with NaN, so the
+    model also replays forecasts from a context with missing values. `quantize_probability`
+    rounds a series onto a coarse grid, like a sensor or a count in fixed units.
     """
 
     kinds: list[str] = Field(default_factory=lambda: ["kernel", "composite", "intermittent"], min_length=1)
     label: str = "teacher"
+    teacher: str = "5M"
     context_lens: Weighted = Field(
         default_factory=lambda: Weighted(values=[256, 512, 1024, 2048, 4096], weights=[1, 2, 2, 2, 1])
     )
@@ -215,12 +227,66 @@ class DistillConfig(TaskConfig):
     past_probability: float = Field(default=0.0, ge=0, le=1)
     known_probability: float = Field(default=0.0, ge=0, le=1)
     covariate_max: int = Field(default=3, ge=1)
+    gap_probability: float = Field(default=0.0, ge=0, le=1)
+    quantize_probability: float = Field(default=0.0, ge=0, le=1)
 
     @model_validator(mode="after")
     def _kinds(self) -> "DistillConfig":
         _known(self.kinds, SERIES_KINDS, "distill kinds")
         if self.label not in DISTILL_LABELS:
             raise ValueError(f"unknown distill label {self.label}; allowed values are {sorted(DISTILL_LABELS)}")
+        if self.teacher not in SIZES:
+            raise ValueError(f"unknown teacher size {self.teacher}; allowed values are {list(SIZES)}")
+        return self
+
+
+class RealConfig(TaskConfig):
+    """History-only windows of real series. The datasets must come from `REAL_DATASETS`.
+
+    A draw picks a dataset uniformly, then a series and a window in it. `label` and
+    `teacher` mean what they do for the distill task. `max_series` caps how many series
+    of one dataset are kept in memory.
+    """
+
+    datasets: list[str] = Field(default_factory=lambda: list(REAL_DATASETS), min_length=1)
+    label: str = "truth"
+    teacher: str = "5M"
+    context_lens: Weighted = Field(
+        default_factory=lambda: Weighted(values=[128, 256, 512, 1024, 2048, 4096], weights=[1, 1, 2, 2, 2, 1])
+    )
+    horizons: Weighted = Field(
+        default_factory=lambda: Weighted(values=[8, 16, 48, 96, 168, 336], weights=[1, 1, 2, 2, 2, 1])
+    )
+    max_series: int = Field(default=2000, ge=1)
+    min_context: int = Field(default=64, ge=8)
+
+    @model_validator(mode="after")
+    def _sources(self) -> "RealConfig":
+        _known(self.datasets, frozenset(REAL_DATASETS), "real datasets")
+        if self.label not in DISTILL_LABELS:
+            raise ValueError(f"unknown real label {self.label}; allowed values are {sorted(DISTILL_LABELS)}")
+        if self.teacher not in SIZES:
+            raise ValueError(f"unknown teacher size {self.teacher}; allowed values are {list(SIZES)}")
+        return self
+
+
+class RealCovariateConfig(RealConfig):
+    """Windows of real multivariate series: one variate is the target, others are covariates.
+
+    Each covariate stops at the origin with `past_probability`, and is otherwise known over
+    the horizon too, as a forecast of it would be. The default labels are the frozen
+    pretrained model's forecast with the same covariates, so the update holds the model's
+    use of real covariates where it was.
+    """
+
+    datasets: list[str] = Field(default_factory=lambda: list(REAL_MULTIVARIATE), min_length=1)
+    label: str = "teacher"
+    past_probability: float = Field(default=0.5, ge=0, le=1)
+    max_covariates: int = Field(default=4, ge=1)
+
+    @model_validator(mode="after")
+    def _multivariate(self) -> "RealCovariateConfig":
+        _known(self.datasets, frozenset(REAL_MULTIVARIATE), "real covariate datasets")
         return self
 
 
@@ -244,13 +310,15 @@ class DataConfig(BaseModel):
     long: LongConfig | None = None
     categorical: CategoricalConfig | None = None
     distill: DistillConfig | None = None
+    real: RealConfig | None = None
+    realcov: RealCovariateConfig | None = None
 
     @classmethod
     def load(cls, path: Path | str = DEFAULT_DATA_CONFIG) -> "DataConfig":
         return parse_yaml_file_as(cls, path)
 
     def tasks(self) -> list[tuple[str, TaskConfig]]:
-        names = ("pool", "history", "exogenous", "past", "multi", "long", "categorical", "distill")
+        names = ("pool", "history", "exogenous", "past", "multi", "long", "categorical", "distill", "real", "realcov")
         return [(name, getattr(self, name)) for name in names if getattr(self, name) is not None]
 
     @model_validator(mode="after")
