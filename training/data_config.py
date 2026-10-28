@@ -11,7 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_yaml import parse_yaml_file_as
 
 DEFAULT_DATA_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "data.yaml"
-SERIES_KINDS = frozenset({"walk", "season", "trend"})
+SERIES_KINDS = frozenset({"walk", "season", "trend", "kernel", "composite", "intermittent"})
+DISTILL_LABELS = frozenset({"teacher", "truth"})
 DECOY_KINDS = frozenset({"both", "daily", "trend"})
 
 
@@ -223,6 +224,36 @@ class CategoricalConfig(TaskConfig):
         return self
 
 
+class DistillConfig(TaskConfig):
+    """History-only replay on broad generic series, at varied context lengths and horizons.
+
+    With `label: teacher` the loss is the distance between the fine-tune's quantiles and
+    those of the frozen pretrained model on the same input, so the update pulls the
+    forecast back toward the pretrained one wherever no other task asks for a change.
+    With `label: truth` it is the ordinary pinball loss against the series itself.
+    Covariate rows, when drawn, are unrelated generic series.
+    """
+
+    kinds: list[str] = Field(default_factory=lambda: ["kernel", "composite", "intermittent"], min_length=1)
+    label: str = "teacher"
+    context_lens: Weighted = Field(
+        default_factory=lambda: Weighted(values=[256, 512, 1024, 2048, 4096], weights=[1, 2, 2, 2, 1])
+    )
+    horizons: Weighted = Field(
+        default_factory=lambda: Weighted(values=[16, 48, 96, 168, 336], weights=[1, 2, 2, 2, 1])
+    )
+    past_probability: float = Field(default=0.0, ge=0, le=1)
+    known_probability: float = Field(default=0.0, ge=0, le=1)
+    covariate_max: int = Field(default=3, ge=1)
+
+    @model_validator(mode="after")
+    def _kinds(self) -> "DistillConfig":
+        _known(self.kinds, SERIES_KINDS, "distill kinds")
+        if self.label not in DISTILL_LABELS:
+            raise ValueError(f"unknown distill label {self.label}; allowed values are {sorted(DISTILL_LABELS)}")
+        return self
+
+
 class DataConfig(BaseModel):
     """Lengths shared by the tasks, and one optional subconfig per task.
 
@@ -243,13 +274,14 @@ class DataConfig(BaseModel):
     long: LongConfig | None = None
     categorical: CategoricalConfig | None = None
     lead: LeadConfig | None = None
+    distill: DistillConfig | None = None
 
     @classmethod
     def load(cls, path: Path | str = DEFAULT_DATA_CONFIG) -> "DataConfig":
         return parse_yaml_file_as(cls, path)
 
     def tasks(self) -> list[tuple[str, TaskConfig]]:
-        names = ("pool", "history", "exogenous", "past", "multi", "long", "categorical", "lead")
+        names = ("pool", "history", "exogenous", "past", "multi", "long", "categorical", "lead", "distill")
         return [(name, getattr(self, name)) for name in names if getattr(self, name) is not None]
 
     @model_validator(mode="after")

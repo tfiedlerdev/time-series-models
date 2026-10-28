@@ -42,6 +42,9 @@ EVAL_TASKS = (
     "lead/late",
     "lead/early-none",
     "lead/late-none",
+    "generic/kernel",
+    "generic/composite",
+    "generic/intermittent",
 )
 
 
