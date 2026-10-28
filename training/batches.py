@@ -7,6 +7,7 @@ from timestral.covariate_encoding import target_encode
 from training.data_config import (
     CategoricalConfig,
     DataConfig,
+    DistillConfig,
     ExogenousConfig,
     HistoryConfig,
     LongConfig,
@@ -295,6 +296,38 @@ def make_past_batch(
     return pack(contexts, False, device), None, past, pack(futures, False, device), tag
 
 
+def make_distill_batch(
+    rng: np.random.Generator,
+    batch: int,
+    device: torch.device,
+    config: DistillConfig | None = None,
+    kind: str | None = None,
+    context_len: int | None = None,
+    horizon: int | None = None,
+) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor, str]:
+    """A generic series, sometimes with unrelated covariate rows. The label is set in the loop."""
+    cfg = config or DistillConfig(weight=1)
+    kind = kind or str(rng.choice(cfg.kinds))
+    context_len = context_len or cfg.context_lens.draw(rng)
+    horizon = horizon or cfg.horizons.draw(rng)
+    length = context_len + horizon
+    n_past = int(rng.integers(1, cfg.covariate_max + 1)) if rng.random() < cfg.past_probability else 0
+    n_known = int(rng.integers(1, cfg.covariate_max + 1)) if rng.random() < cfg.known_probability else 0
+    contexts, futures, pasts, knowns = [], [], [], []
+    for _ in range(batch):
+        series = make_series(rng, length, kind)
+        contexts.append(series[:context_len])
+        futures.append(series[context_len:])
+        if n_past:
+            pasts.append(np.stack([make_series(rng, context_len, str(rng.choice(cfg.kinds))) for _ in range(n_past)]))
+        if n_known:
+            knowns.append(np.stack([make_series(rng, length, str(rng.choice(cfg.kinds))) for _ in range(n_known)]))
+    past = torch.tensor(np.stack(pasts), dtype=torch.float32, device=device) if pasts else None
+    known = torch.tensor(np.stack(knowns), dtype=torch.float32, device=device) if knowns else None
+    tag = f"distill {kind} {context_len} h{horizon} past{n_past} known{n_known}"
+    return pack(contexts, False, device), known, past, pack(futures, False, device), tag
+
+
 def next_batch(
     rng: np.random.Generator,
     batch: int,
@@ -344,6 +377,8 @@ def next_batch(
             rng, batch, kind, cfg.long_context, device, horizon=cfg.horizon
         )
         tag = "long" + tag.removeprefix("history")
+    elif task == "distill":
+        context, known, past, future, tag = make_distill_batch(rng, batch, device, config=cfg.distill)
     else:
         context, known, past, future, tag = make_categorical_batch(
             rng, batch, device, config=cfg.categorical, context_len=cfg.context_len, horizon=cfg.horizon

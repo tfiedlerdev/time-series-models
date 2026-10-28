@@ -110,11 +110,11 @@ def open_run(args: argparse.Namespace, device: torch.device) -> wandb.Run | None
     run = wandb.init(
         project=args.wandb_project,
         entity=args.wandb_entity,
-        name="pool-mix-5m",
+        name=args.run_name,
         group="pool-mix",
         job_type="train",
         notes=run_notes(args),
-        tags=["timestral-5m", "pool-mix", "replay"],
+        tags=["timestral-5m", "pool-mix", "replay", *_extra_tags(args)],
         save_code=True,
         config={
             "model": "mistralai/Timestral-5M",
@@ -137,6 +137,10 @@ def open_run(args: argparse.Namespace, device: torch.device) -> wandb.Run | None
     return run
 
 
+def _extra_tags(args: argparse.Namespace) -> list[str]:
+    return [tag.strip() for tag in getattr(args, "tags", "").split(",") if tag.strip()]
+
+
 def log_checkpoint(
     run: wandb.Run | None,
     path: Path,
@@ -150,7 +154,7 @@ def log_checkpoint(
         return
     # A partial run keeps its own alias. Promoting it to latest would make the next
     # benchmark score a model that stopped early.
-    aliases = ["interrupted"] if interrupted else ["latest", "pool-mix"]
+    aliases = ["interrupted"] if interrupted else ["latest", "pool-mix", run.name]
     artifact = wandb.Artifact(
         "timestral-5m-pool-mix",
         type="model",

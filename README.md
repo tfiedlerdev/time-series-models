@@ -8,7 +8,7 @@ Pretrained Timestral-5M stops gaining once about ten noisy nonlinear views of a 
 
 The setup, the table, and why the error does not go to zero are in [findings/view-curve.md](findings/view-curve.md).
 
-The aim is a better synthetic data mix: raise that capability without giving up performance on the model's other tasks. That is not a completed result.
+The aim is a better synthetic data mix: raise that capability without giving up performance on the model's other tasks. Replaying broad generic series against the frozen pretrained forecast is in [findings/distill-replay.md](findings/distill-replay.md).
 
 Another finished run, a true covariate among decoys, is in [findings/decoy-sweep.md](findings/decoy-sweep.md).
 
