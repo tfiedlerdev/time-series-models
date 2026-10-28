@@ -48,7 +48,7 @@ Easy decoys tell the same story. With the true row, all three fine-tunes stay ne
 
 On the shared training eval the stack run matches the reference. Pooling at 64 views is 0.258 against 0.253, and one exogenous reading is 0.413 against 0.409. Both stay below the pretrained model, 0.380 and 0.483.
 
-TIME is W&B run [`gkzi6j7g`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/gkzi6j7g), against the cached pretrained baseline. On the 60 tasks scored so far the mean relative change is -4.3% for the stack run and -4.0% for the reference, on the same tasks. The reference's finished TIME run, all 98 tasks, is -3.5%, run [`c1zb66vp`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/c1zb66vp).
+TIME, all 98 tasks, is W&B run [`gkzi6j7g`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/gkzi6j7g). The mean relative change in MASE against the pretrained baseline is -3.8% for the stack run and -3.5% for the reference, run [`c1zb66vp`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/c1zb66vp). The fev covariate subset, 26 tasks, is [`392oxpwa`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/392oxpwa): SQL -6.2%.
 
 ## What follows
 
