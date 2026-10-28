@@ -17,23 +17,23 @@ Whether labelling the replay series with a bigger frozen Timestral, instead of t
 
 ## Benchmarks
 
-Changes are in the error against pretrained Timestral-5M, so a negative number is a lower error. TIME is all 98 tasks. fev is the 26-task covariate subset. The 123M fev run finished 21 of the 26 tasks, so the size curve in the figure uses the 21 tasks every run has.
+Changes are in the error against pretrained Timestral-5M, so a negative number is a lower error. TIME is all 98 tasks. fev is the 26-task covariate subset.
 
 ![Error change against teacher size. TIME MASE and fev SQL both rise once the teacher is bigger than the student.](teacher-size.png)
 
-| run | TIME MASE | TIME QL | TIME tasks >+1% | fev SQL, 26 tasks | fev SQL, 21 tasks | fev tasks worse |
+| run | TIME MASE | TIME QL | TIME tasks >+1% | fev SQL | fev MASE | fev tasks worse |
 |---|---:|---:|---:|---:|---:|---:|
-| teacher 5M | +0.11% | +0.05% | 4 | +2.27% | +2.83% | 21 of 26 |
-| teacher 28M | +0.47% | +0.21% | 22 | +3.31% | +4.16% | 20 of 26 |
-| teacher 123M | +0.69% | +0.37% | 26 | | +4.12% | 18 of 21 |
-| teacher 209M | +0.57% | +0.30% | 22 | +3.39% | +4.24% | 20 of 26 |
-| 209M, weight 0.5 | +0.64% | +0.40% | 25 | +2.85% | | 20 of 26 |
-| 209M only | +0.64% | +0.47% | 25 | +1.12% | | 12 of 26 |
+| teacher 5M | +0.11% | +0.05% | 4 | +2.27% | +2.46% | 21 of 26 |
+| teacher 28M | +0.47% | +0.21% | 22 | +3.31% | +3.45% | 20 of 26 |
+| teacher 123M | +0.69% | +0.37% | 26 | +3.27% | +3.38% | 20 of 26 |
+| teacher 209M | +0.57% | +0.30% | 22 | +3.39% | +3.46% | 20 of 26 |
+| 209M, weight 0.5 | +0.64% | +0.40% | 25 | +2.85% | +2.92% | 20 of 26 |
+| 209M only | +0.64% | +0.47% | 25 | +1.12% | +0.99% | 12 of 26 |
 
 The benchmark runs on W&B:
 
 - TIME: 28M [`t4bo3303`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/t4bo3303) (resumed from [`tqhzt79h`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/tqhzt79h)), 123M [`l8ov5pvp`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/l8ov5pvp), 209M [`e2meki9j`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/e2meki9j), weight 0.5 [`27gf68xn`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/27gf68xn), 209M only [`vqwznw4k`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/vqwznw4k).
-- fev: 28M [`9w94xvqq`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/9w94xvqq), 123M [`3ssfpc03`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/3ssfpc03), 209M [`ti8f5h26`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/ti8f5h26), weight 0.5 [`ejeuqwao`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/ejeuqwao), 209M only [`yx0s76jn`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/yx0s76jn).
+- fev: 28M [`9w94xvqq`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/9w94xvqq), 123M [`xtyi6o07`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/xtyi6o07) (resumed from [`3ssfpc03`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/3ssfpc03)), 209M [`ti8f5h26`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/ti8f5h26), weight 0.5 [`ejeuqwao`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/ejeuqwao), 209M only [`yx0s76jn`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/yx0s76jn).
 
 The teacher itself is much better on TIME than the student. Pretrained 209M finished 15 TIME tasks before it was stopped to free memory (it holds about 65 GB on the GB10). On those 15 tasks it is at MASE −7.23% against pretrained 5M, lower on all 15. The 5M students on the same 15 tasks: 5M teacher +0.33%, 28M +0.98%, 123M +1.10%, 209M +0.88%, 209M only +0.42%.
 
