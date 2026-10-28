@@ -6,6 +6,7 @@ from timestral import TimestralForecaster
 
 from training.batches import (
     make_categorical_batch,
+    make_distill_batch,
     make_exogenous_batch,
     make_history_batch,
     make_multi_batch,
@@ -20,6 +21,8 @@ from training.series import make_covariate, make_signal, pack
 # The view_curve.py figure, logged at a few counts. That script sweeps every count.
 VIEW_COUNTS = (0, 1, 8, 32, 64)
 VIEW_POOL = 64
+GENERIC_KINDS = ("kernel", "composite", "intermittent")
+GENERIC_CONTEXT = 1024
 
 
 def pinball_loss(quantiles: torch.Tensor, target: torch.Tensor, levels: tuple[float, ...]) -> torch.Tensor:
@@ -180,6 +183,23 @@ def evaluate(forecaster: TimestralForecaster, n_series: int, seed: int) -> dict[
         scores[f"categorical/{mode}"] = _median_mae(forecaster, batches)
     scores.update(view_curve(forecaster, n_series, seed + 10_000))
     scores.update(graph(forecaster, n_series, seed + 60_000))
+    scores.update(generic(forecaster, n_series, seed + 30_000))
+    return scores
+
+
+def generic(forecaster: TimestralForecaster, n_series: int, seed: int) -> dict[str, float]:
+    """History-only error on the broad generic series, scaled by each context's spread."""
+    rng = np.random.default_rng(seed)
+    scores = {}
+    for kind in GENERIC_KINDS:
+        errors = []
+        for _ in range(n_series):
+            context, _known, _past, future, _tag = make_distill_batch(
+                rng, 1, forecaster.device, kind=kind, context_len=GENERIC_CONTEXT, horizon=HORIZON
+            )
+            scale = float(context.std().clamp_min(0.1))
+            errors.append(_forecast_mae(forecaster, context, None, None, future) / scale)
+        scores[f"generic/{kind}"] = float(np.median(errors))
     return scores
 
 

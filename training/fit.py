@@ -32,7 +32,17 @@ def _batch_key(sample: tuple) -> tuple:
         None if known is None else known.shape[1:],
         None if past is None else past.shape[1:],
         future.shape[1:],
+        sample[4] == "distill",
     )
+
+
+def _load_teacher(data: DataConfig, device: torch.device) -> TimestralForecaster | None:
+    """The frozen pretrained model, when the distill task takes its labels from it."""
+    if data.distill is None or data.distill.label != "teacher":
+        return None
+    teacher = TimestralForecaster.from_pretrained("mistralai/Timestral-5M", device=device)
+    teacher.model.requires_grad_(False)
+    return teacher
 
 
 def _cat_samples(group: list[tuple]) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor]:
@@ -60,6 +70,7 @@ def train(args: argparse.Namespace) -> None:
         model = forecaster.model
         model.train()
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.0)
+        teacher = _load_teacher(args.data, device)
         rng = np.random.default_rng(args.seed)
         print(f"device {device}", flush=True)
         before = evaluate(forecaster, args.eval_series, args.eval_seed)
@@ -101,7 +112,22 @@ def train(args: argparse.Namespace) -> None:
                     past_covariates=past,
                     known_covariates=known,
                 )
-                loss = pinball_loss(quantiles, future, forecaster.quantile_levels)
+                if group[0][4] == "distill":
+                    scale = context.std(dim=-1, keepdim=True).clamp_min(0.1).unsqueeze(-1)
+                    if teacher is None:
+                        loss = pinball_loss(quantiles / scale, future / scale[..., 0], forecaster.quantile_levels)
+                    else:
+                        with torch.no_grad():
+                            labels = teacher._forecast_raw(
+                                context,
+                                torch.ones_like(context, dtype=torch.bool),
+                                future.shape[-1],
+                                past_covariates=past,
+                                known_covariates=known,
+                            )
+                        loss = ((quantiles - labels) / scale).abs().mean()
+                else:
+                    loss = pinball_loss(quantiles, future, forecaster.quantile_levels)
                 (loss * (len(group) / args.batch_size)).backward()
                 value = float(loss.detach())
                 overall += value * len(group) / args.batch_size

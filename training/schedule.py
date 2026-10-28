@@ -41,6 +41,9 @@ EVAL_TASKS = (
     "graph/kept",
     "graph/all",
     "graph/none",
+    "generic/kernel",
+    "generic/composite",
+    "generic/intermittent",
 )
 
 
