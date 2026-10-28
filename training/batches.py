@@ -207,6 +207,8 @@ def make_exogenous_batch(
         n_decoy = int(rng.choice(cfg.no_driver_decoy_counts))
     if n_known is None:
         n_known = cfg.known_counts.draw(rng)
+    if n_decoy is None and cfg.stack_probability > 0 and rng.random() < cfg.stack_probability:
+        n_decoy = cfg.stack_counts.draw(rng)
     if n_decoy is None:
         n_decoy = cfg.decoy_counts.draw(rng)
     if horizon is None:

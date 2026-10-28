@@ -40,7 +40,11 @@ COUNTS = tuple(range(17))
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--artifact", default=DEFAULT_ARTIFACT, help="W&B artifact name or alias.")
+    parser.add_argument(
+        "--artifact",
+        default=DEFAULT_ARTIFACT,
+        help="W&B artifact name or alias. Several, comma-separated, are scored side by side.",
+    )
     parser.add_argument("--checkpoint", type=Path, help="Local weights. Skips the artifact download.")
     parser.add_argument("--pretrained", action="store_true", help="Score the base model only.")
     parser.add_argument("--true", type=int, default=1, help="Dependent covariates held fixed.")
@@ -48,24 +52,66 @@ def main() -> None:
     parser.add_argument("--series", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="auto", help="auto, cpu, or cuda.")
+    parser.add_argument("--plot", type=Path, help="Save the sweep as a figure, one panel per decoy family.")
     args = parser.parse_args()
     if args.true < 0:
         raise SystemExit("--true must be at least 0")
     counts = _counts(args.counts)
     device = _device(args.device)
-    label, path = (None, None) if args.pretrained else _weights(args)
+    if args.pretrained:
+        tuned_models = []
+    elif args.checkpoint is not None or "," not in args.artifact:
+        tuned_models = [_weights(args)]
+    else:
+        tuned_models = [_weights(argparse.Namespace(checkpoint=None, artifact=name.strip())) for name in args.artifact.split(",")]
     forecaster = TimestralForecaster.from_pretrained("mistralai/Timestral-5M", device=device)
     print(f"device {device}", flush=True)
     rows = _cases(args.true, counts, args.series, args.seed, device)
+    columns: dict[str, list[float]] = {}
     with torch.no_grad():
         print("pretrained", flush=True)
-        base = _score(forecaster, rows)
-        tuned = None
-        if path is not None:
+        columns["pretrained"] = _score(forecaster, rows)
+        for label, path in tuned_models:
             apply_checkpoint(forecaster, path)
             print(label, flush=True)
-            tuned = _score(forecaster, rows)
-    _print(rows, base, tuned)
+            columns[label] = _score(forecaster, rows)
+    if len(columns) <= 2:
+        tuned = None if len(columns) == 1 else list(columns.values())[1]
+        _print(rows, columns["pretrained"], tuned)
+    else:
+        _print_columns(rows, columns)
+    if args.plot is not None:
+        _plot(rows, columns, args.plot)
+
+
+def _print_columns(rows, columns: dict[str, list[float]]) -> None:
+    labels = list(columns)
+    print(f"{'kind':<10} {'true':>5} {'decoys':>7}" + "".join(f" {label[-24:]:>26}" for label in labels))
+    for index, (kind, n_true, n_decoy, _batches) in enumerate(rows):
+        cells = "".join(f" {columns[label][index]:26.3f}" for label in labels)
+        print(f"{kind:<10} {n_true:5d} {n_decoy:7d}{cells}", flush=True)
+
+
+def _plot(rows, columns: dict[str, list[float]], output: Path) -> None:
+    import matplotlib.pyplot as plt
+
+    kinds = list(dict.fromkeys(kind for kind, *_ in rows))
+    fig, axes = plt.subplots(1, len(kinds), figsize=(6 * len(kinds), 4.5), layout="constrained", squeeze=False)
+    for ax, kind in zip(axes[0], kinds):
+        for color, (label, scores) in enumerate(columns.items()):
+            for n_true in sorted({row[1] for row in rows}, reverse=True):
+                points = [(row[2], score) for row, score in zip(rows, scores) if row[0] == kind and row[1] == n_true]
+                xs, ys = zip(*points)
+                style = "-" if n_true else "--"
+                name = f"{label}, {n_true} true" if n_true else f"{label}, none"
+                ax.plot(xs, ys, style, color=f"C{color}", lw=1.5, label=name)
+        ax.set_title(f"{kind} decoys")
+        ax.set_xlabel("decoys beside the target")
+        ax.set_ylabel("median MAE")
+    axes[0][0].legend(fontsize=8)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output)
+    print(f"saved {output}", flush=True)
 
 
 def _score(forecaster: TimestralForecaster, rows) -> list[float]:
@@ -182,7 +228,7 @@ def _weights(args) -> tuple[str, Path]:
         found = [path.name for path in weights]
         raise SystemExit(f"Expected one .pt file in {name}, found {found}.")
     print(f"using {artifact.name}", flush=True)
-    return str(artifact.name), weights[0]
+    return args.artifact.split("/")[-1].split(":")[-1], weights[0]
 
 
 def _counts(text: str) -> list[int]:

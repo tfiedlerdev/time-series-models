@@ -177,6 +177,32 @@ def evaluate(forecaster: TimestralForecaster, n_series: int, seed: int) -> dict[
         batches = [make_categorical_batch(rng, 1, device, mode=mode) for _ in range(n_series)]
         scores[f"categorical/{mode}"] = _median_mae(forecaster, batches)
     scores.update(view_curve(forecaster, n_series, seed + 10_000))
+    scores.update(decoy_stack(forecaster, n_series, seed + 20_000))
+    return scores
+
+
+def decoy_stack(forecaster: TimestralForecaster, n_series: int, seed: int) -> dict[str, float]:
+    """One true reading beside a stack of calendar decoys, and the same stack without it."""
+    rng = np.random.default_rng(seed)
+    device = forecaster.device
+    scores = {}
+    for n_known, n_decoy in ((1, 8), (0, 8), (1, 16)):
+        batches = [
+            make_exogenous_batch(
+                rng,
+                1,
+                device,
+                n_known=n_known,
+                n_decoy=n_decoy,
+                static=False,
+                nonnegative=False,
+                gate=False,
+                horizon=HORIZON,
+                trend=False,
+            )
+            for _ in range(n_series)
+        ]
+        scores[f"stack/{n_known}+{n_decoy}"] = _median_mae(forecaster, batches)
     return scores
 
 
