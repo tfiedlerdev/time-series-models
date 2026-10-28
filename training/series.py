@@ -159,6 +159,99 @@ def intermittent(rng: np.random.Generator, length: int) -> np.ndarray:
     return rng.poisson(rate).astype(np.float64)
 
 
+def regime(rng: np.random.Generator, length: int) -> np.ndarray:
+    """An AR process that switches between two or three regimes, each with its own mean, memory and noise."""
+    n_regimes = int(rng.integers(2, 4))
+    means = rng.normal(0, 2.0, n_regimes)
+    phis = rng.uniform(0.3, 0.99, n_regimes)
+    scales = rng.uniform(0.05, 0.8, n_regimes)
+    stay = float(rng.uniform(0.98, 0.999))
+    seasonal = 0.5 * _seasonal(rng, np.arange(length)) if rng.random() < 0.5 else np.zeros(length)
+    state = int(rng.integers(0, n_regimes))
+    deviation = 0.0
+    out = np.empty(length)
+    for index in range(length):
+        if rng.random() > stay:
+            state = int(rng.integers(0, n_regimes))
+        deviation = phis[state] * deviation + rng.normal(0, scales[state])
+        out[index] = means[state] + deviation
+    return out + seasonal
+
+
+def _event_shape(rng: np.random.Generator, width: int) -> np.ndarray:
+    steps = np.arange(width) / max(width - 1, 1)
+    choice = int(rng.integers(0, 4))
+    if choice == 0:
+        return np.ones(width)
+    if choice == 1:
+        return 1 - np.abs(2 * steps - 1)
+    if choice == 2:
+        return np.exp(-steps * float(rng.uniform(2, 8)))
+    return np.exp(-0.5 * ((steps - 0.5) / 0.18) ** 2)
+
+
+def events(rng: np.random.Generator, length: int) -> np.ndarray:
+    """A seasonal AR baseline with localised events: plateaus, ramps, decays and bumps of random width and sign."""
+    time = np.arange(length)
+    body = _seasonal(rng, time) + _ar(rng, length, float(rng.uniform(0.5, 0.99)), float(rng.uniform(0.05, 0.4)))
+    for start in rng.integers(0, length, size=int(rng.poisson(length / 400) + 1)):
+        width = int(rng.integers(3, max(4, length // 20)))
+        end = min(length, int(start) + width)
+        size = float(rng.normal(0, 3.0))
+        body[start:end] += size * _event_shape(rng, width)[: end - int(start)]
+    return body
+
+
+def piecewise(rng: np.random.Generator, length: int) -> np.ndarray:
+    """A piecewise-linear trend with changepoints, a season, and AR noise, sometimes multiplicative."""
+    time = np.arange(length)
+    knots = np.sort(rng.integers(1, length - 1, size=int(rng.integers(1, 6))))
+    slopes = rng.normal(0, 3.0 / length, knots.shape[0] + 1)
+    slope = np.full(length, slopes[0])
+    for knot, value in zip(knots, slopes[1:]):
+        slope[knot:] = value
+    trend = np.cumsum(slope) * float(rng.uniform(0.5, 3.0))
+    seasonal = _seasonal(rng, time) * float(rng.uniform(0, 1))
+    noise = _ar(rng, length, float(rng.uniform(0, 0.95)), float(rng.uniform(0.05, 0.4)))
+    if rng.random() < 0.3:
+        level = trend - trend.min() + 1.0
+        return level * (1 + 0.2 * seasonal) + noise
+    return trend + seasonal + noise
+
+
+def _waveform(rng: np.random.Generator, phase: np.ndarray) -> np.ndarray:
+    """One cycle shape on phase in [0, 1): sawtooth, square, a clipped arch, or a narrow peak."""
+    choice = int(rng.integers(0, 4))
+    if choice == 0:
+        return phase - 0.5
+    if choice == 1:
+        return np.where(phase < float(rng.uniform(0.2, 0.8)), 1.0, -1.0)
+    if choice == 2:
+        return np.maximum(np.sin(2 * np.pi * phase), 0.0)
+    center = float(rng.uniform(0, 1))
+    distance = np.minimum(np.abs(phase - center), 1 - np.abs(phase - center))
+    return np.exp(-0.5 * (distance / float(rng.uniform(0.02, 0.1))) ** 2)
+
+
+def profile(rng: np.random.Generator, length: int) -> np.ndarray:
+    """A non-sinusoidal periodic profile whose amplitude drifts, with noise that grows with the level.
+
+    Arched profiles stay at zero between cycles, like solar output.
+    """
+    time = np.arange(length)
+    period = float(rng.choice(PERIODS[2:]))
+    shape = _waveform(rng, (time / period + float(rng.uniform(0, 1))) % 1.0)
+    amplitude = np.exp(0.3 * _ar(rng, length, 0.995, float(rng.uniform(0.01, 0.05))))
+    body = amplitude * shape * float(rng.uniform(0.5, 3.0))
+    if rng.random() < 0.5:
+        body = body + 0.4 * _seasonal(rng, time)
+    noise = rng.normal(0, 1, length) * (0.05 + 0.2 * np.abs(body)) * float(rng.uniform(0.2, 1.0))
+    out = body + noise
+    if shape.min() >= 0:
+        out = np.maximum(out, 0.0)
+    return out
+
+
 def make_series(rng: np.random.Generator, length: int, kind: str) -> np.ndarray:
     """A series whose own future is the forecast target."""
     if kind == "train":
@@ -169,6 +262,14 @@ def make_series(rng: np.random.Generator, length: int, kind: str) -> np.ndarray:
         return composite(rng, length)
     if kind == "intermittent":
         return intermittent(rng, length)
+    if kind == "regime":
+        return regime(rng, length)
+    if kind == "events":
+        return events(rng, length)
+    if kind == "piecewise":
+        return piecewise(rng, length)
+    if kind == "profile":
+        return profile(rng, length)
     if kind == "walk":
         return np.cumsum(rng.normal(0, 0.4, length))
     if kind == "season":
