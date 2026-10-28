@@ -72,3 +72,15 @@ REAL_DATASETS = (
     "cif_2016_6",
     "cif_2016_12",
 )
+
+# The sources above whose series have several related variates, long enough to forecast.
+REAL_MULTIVARIATE = (
+    "BEIJING_SUBWAY_30MIN",
+    "HZMETRO",
+    "SHMETRO",
+    "PEMS04",
+    "PEMS08",
+    "beijing_air_quality",
+    "china_air_quality",
+    "subseasonal",
+)

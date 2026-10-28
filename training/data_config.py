@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_yaml import parse_yaml_file_as
 
 from benchmarks.model import SIZES
-from training.real_sources import REAL_DATASETS
+from training.real_sources import REAL_DATASETS, REAL_MULTIVARIATE
 
 DEFAULT_DATA_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "data.yaml"
 SERIES_KINDS = frozenset(
@@ -270,6 +270,26 @@ class RealConfig(TaskConfig):
         return self
 
 
+class RealCovariateConfig(RealConfig):
+    """Windows of real multivariate series: one variate is the target, others are covariates.
+
+    Each covariate stops at the origin with `past_probability`, and is otherwise known over
+    the horizon too, as a forecast of it would be. The default labels are the frozen
+    pretrained model's forecast with the same covariates, so the update holds the model's
+    use of real covariates where it was.
+    """
+
+    datasets: list[str] = Field(default_factory=lambda: list(REAL_MULTIVARIATE), min_length=1)
+    label: str = "teacher"
+    past_probability: float = Field(default=0.5, ge=0, le=1)
+    max_covariates: int = Field(default=4, ge=1)
+
+    @model_validator(mode="after")
+    def _multivariate(self) -> "RealCovariateConfig":
+        _known(self.datasets, frozenset(REAL_MULTIVARIATE), "real covariate datasets")
+        return self
+
+
 class DataConfig(BaseModel):
     """Lengths shared by the tasks, and one optional subconfig per task.
 
@@ -291,13 +311,14 @@ class DataConfig(BaseModel):
     categorical: CategoricalConfig | None = None
     distill: DistillConfig | None = None
     real: RealConfig | None = None
+    realcov: RealCovariateConfig | None = None
 
     @classmethod
     def load(cls, path: Path | str = DEFAULT_DATA_CONFIG) -> "DataConfig":
         return parse_yaml_file_as(cls, path)
 
     def tasks(self) -> list[tuple[str, TaskConfig]]:
-        names = ("pool", "history", "exogenous", "past", "multi", "long", "categorical", "distill", "real")
+        names = ("pool", "history", "exogenous", "past", "multi", "long", "categorical", "distill", "real", "realcov")
         return [(name, getattr(self, name)) for name in names if getattr(self, name) is not None]
 
     @model_validator(mode="after")

@@ -13,8 +13,8 @@ from training.batches import (
     make_past_batch,
     make_pool_batch,
 )
-from training.data_config import RealConfig
-from training.real import REAL_ROOT, draw_window, load_dataset, pack_window
+from training.data_config import RealConfig, RealCovariateConfig
+from training.real import REAL_ROOT, draw_covariate_window, draw_window, load_dataset, load_multivariate, pack_window
 from training.schedule import CONTEXT_LEN, EVAL_TASKS, HISTORY_KINDS, HORIZON, LONG_CONTEXT
 from training.series import make_covariate, make_signal
 
@@ -184,6 +184,7 @@ def evaluate(forecaster: TimestralForecaster, n_series: int, seed: int) -> dict[
     scores.update(view_curve(forecaster, n_series, seed + 10_000))
     scores.update(generic(forecaster, n_series, seed + 30_000))
     scores.update(real_heldout(forecaster, 4 * n_series, seed + 70_000))
+    scores.update(realcov_heldout(forecaster, 4 * n_series, seed + 80_000))
     return scores
 
 
@@ -207,6 +208,44 @@ def real_heldout(forecaster: TimestralForecaster, n_windows: int, seed: int) -> 
         spread = float(context[observed].std().clamp_min(0.1))
         errors.append(float((median - future).abs().mean()) / spread)
     return {"real/heldout": float(np.median(errors))}
+
+
+def realcov_heldout(forecaster: TimestralForecaster, n_windows: int, seed: int) -> dict[str, float]:
+    """Held-out real windows with half their covariates known ahead, and the same windows with none."""
+    if not REAL_ROOT.exists():
+        return {}
+    config = RealCovariateConfig(weight=1)
+    rng = np.random.default_rng(seed)
+    cells: dict[str, list[float]] = {"realcov/heldout": [], "realcov/heldout-none": []}
+    while len(cells["realcov/heldout"]) < n_windows:
+        name = str(rng.choice(config.datasets))
+        _train, heldout = load_multivariate(name, config.max_series, config.min_context + min(config.horizons.values))
+        window = (
+            draw_covariate_window(rng, heldout, CONTEXT_LEN, [HORIZON], config.min_context, config.max_covariates)
+            if heldout
+            else None
+        )
+        if window is None:
+            continue
+        context, future, rows, ahead = window
+        stops = rng.random(rows.shape[0]) < config.past_probability
+        device = forecaster.device
+        past = torch.tensor(rows[stops][None], dtype=torch.float32, device=device) if stops.any() else None
+        known = (
+            torch.tensor(np.concatenate([rows[~stops], ahead[~stops]], axis=1)[None], dtype=torch.float32, device=device)
+            if (~stops).any()
+            else None
+        )
+        context_t, future_t = pack_window(context, future, device)
+        observed = torch.isfinite(context_t)
+        spread = float(context_t[observed].std().clamp_min(0.1))
+        for key, covariates in (("realcov/heldout", (past, known)), ("realcov/heldout-none", (None, None))):
+            quantiles = forecaster._forecast_raw(
+                torch.nan_to_num(context_t), observed, HORIZON, past_covariates=covariates[0], known_covariates=covariates[1]
+            )
+            median = quantiles[..., quantiles.shape[-1] // 2]
+            cells[key].append(float((median - future_t).abs().mean()) / spread)
+    return {key: float(np.median(values)) for key, values in cells.items()}
 
 
 def generic(forecaster: TimestralForecaster, n_series: int, seed: int) -> dict[str, float]:

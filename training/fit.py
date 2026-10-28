@@ -14,7 +14,7 @@ from training.eval import evaluate, pinball_loss, print_scores
 from training.schedule import learning_rate
 from training.tracking import Tracker, log_checkpoint, open_run
 
-REPLAY_TASKS = ("distill", "real")
+REPLAY_TASKS = ("distill", "real", "realcov")
 
 
 def resolve_device(name: str) -> torch.device:

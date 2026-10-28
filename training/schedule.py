@@ -46,6 +46,8 @@ EVAL_TASKS = (
     "generic/piecewise",
     "generic/profile",
     "real/heldout",
+    "realcov/heldout",
+    "realcov/heldout-none",
 )
 
 
