@@ -10,6 +10,8 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_yaml import parse_yaml_file_as
 
+from benchmarks.model import SIZES
+
 DEFAULT_DATA_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "data.yaml"
 SERIES_KINDS = frozenset({"walk", "season", "trend", "kernel", "composite", "intermittent"})
 DISTILL_LABELS = frozenset({"teacher", "truth"})
@@ -201,11 +203,14 @@ class DistillConfig(TaskConfig):
     those of the frozen pretrained model on the same input, so the update pulls the
     forecast back toward the pretrained one wherever no other task asks for a change.
     With `label: truth` it is the ordinary pinball loss against the series itself.
-    Covariate rows, when drawn, are unrelated generic series.
+    Covariate rows, when drawn, are unrelated generic series. `teacher` is the Timestral
+    size that gives the labels. A larger one pulls the fine-tune toward a forecast it
+    did not have.
     """
 
     kinds: list[str] = Field(default_factory=lambda: ["kernel", "composite", "intermittent"], min_length=1)
     label: str = "teacher"
+    teacher: str = "5M"
     context_lens: Weighted = Field(
         default_factory=lambda: Weighted(values=[256, 512, 1024, 2048, 4096], weights=[1, 2, 2, 2, 1])
     )
@@ -221,6 +226,8 @@ class DistillConfig(TaskConfig):
         _known(self.kinds, SERIES_KINDS, "distill kinds")
         if self.label not in DISTILL_LABELS:
             raise ValueError(f"unknown distill label {self.label}; allowed values are {sorted(DISTILL_LABELS)}")
+        if self.teacher not in SIZES:
+            raise ValueError(f"unknown teacher size {self.teacher}; allowed values are {list(SIZES)}")
         return self
 
 
