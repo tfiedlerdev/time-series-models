@@ -10,15 +10,13 @@ The setup, the table, and why the error does not go to zero are in [findings/vie
 
 The aim is a better synthetic data mix: raise that capability without giving up performance on the model's other tasks. Replaying broad generic series against the frozen pretrained forecast is in [findings/distill-replay.md](findings/distill-replay.md).
 
-Another finished run, a true covariate among decoys, is in [findings/decoy-sweep.md](findings/decoy-sweep.md).
+A true covariate among decoys is in [findings/decoy-sweep.md](findings/decoy-sweep.md). A target that follows a measurement known only up to the origin is in [findings/leading-measurement.md](findings/leading-measurement.md).
 
 ## Research idea queue
 
-Two shapes are missing from the synthetic mix. Both are capabilities the pretrained model has, and a fine-tune that never sees them can drop them.
+One shape is missing from the synthetic mix. It is a capability the pretrained model has, and a fine-tune that never sees it can drop it.
 
 **Masked dependent covariates.** Timestral treats NaN as missing, and the fine-tune never asks it to. Every training series is fully observed. A useful task is the exogenous series with its true readings masked on different stretches: at one time the first reading is present and the second is missing, and later the reverse. The forecast should follow whichever reading is actually there.
-
-**A leading measurement that stops at the origin.** The past-only task is a lagged copy of the target itself. What we do not have is a covariate the target follows with a delay. The target is a nonlinear function of a measurement that happened earlier, and that measurement is known only up to the forecast origin. Because of the delay, its recent values still determine the beginning of the horizon, and they say nothing about the steps beyond the delay. The mismatch has to be visible in the context, the same way the exogenous decoys are.
 
 The [decoy sweep](findings/decoy-sweep.md) turned up a different hole. This one is a blend the fine-tune learned.
 
