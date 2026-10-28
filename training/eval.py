@@ -9,6 +9,7 @@ from training.batches import (
     make_distill_batch,
     make_exogenous_batch,
     make_history_batch,
+    make_lead_batch,
     make_multi_batch,
     make_past_batch,
     make_pool_batch,
@@ -19,6 +20,7 @@ from training.series import make_covariate, make_signal
 # The view_curve.py figure, logged at a few counts. That script sweeps every count.
 VIEW_COUNTS = (0, 1, 8, 32, 64)
 VIEW_POOL = 64
+LEAD_DELAY = 24
 GENERIC_KINDS = ("kernel", "composite", "intermittent")
 GENERIC_CONTEXT = 1024
 
@@ -180,6 +182,7 @@ def evaluate(forecaster: TimestralForecaster, n_series: int, seed: int) -> dict[
         batches = [make_categorical_batch(rng, 1, device, mode=mode) for _ in range(n_series)]
         scores[f"categorical/{mode}"] = _median_mae(forecaster, batches)
     scores.update(view_curve(forecaster, n_series, seed + 10_000))
+    scores.update(lead(forecaster, n_series, seed + 50_000))
     scores.update(generic(forecaster, n_series, seed + 30_000))
     return scores
 
@@ -198,6 +201,24 @@ def generic(forecaster: TimestralForecaster, n_series: int, seed: int) -> dict[s
             errors.append(_forecast_mae(forecaster, context, None, None, future) / scale)
         scores[f"generic/{kind}"] = float(np.median(errors))
     return scores
+
+
+def lead(forecaster: TimestralForecaster, n_series: int, seed: int, delay: int = LEAD_DELAY) -> dict[str, float]:
+    """Error before and after the delay, with the leading measurement and with only the lagging decoy."""
+    rng = np.random.default_rng(seed)
+    cells: dict[str, list[float]] = {name: [] for name in ("lead/early", "lead/late", "lead/early-none", "lead/late-none")}
+    for _ in range(n_series):
+        context, _known, past, future, _tag = make_lead_batch(
+            rng, 1, forecaster.device, delay=delay, n_decoy=1, calendar=False
+        )
+        for suffix, rows in (("", past), ("-none", past[:, 1:])):
+            quantiles = forecaster._forecast_raw(
+                context, torch.ones_like(context, dtype=torch.bool), future.shape[-1], past_covariates=rows
+            )
+            error = (quantiles[..., forecaster.median_index] - future).abs()[0, 0]
+            cells[f"lead/early{suffix}"].append(float(error[:delay].mean()))
+            cells[f"lead/late{suffix}"].append(float(error[delay:].mean()))
+    return {name: float(np.median(values)) for name, values in cells.items()}
 
 
 def view_pool(rng: np.random.Generator, n_views: int) -> tuple[np.ndarray, np.ndarray]:
