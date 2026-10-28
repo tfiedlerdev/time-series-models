@@ -45,6 +45,13 @@ def _load_teacher(data: DataConfig, device: torch.device) -> TimestralForecaster
     return teacher
 
 
+def _observed_std(context: torch.Tensor, observed: torch.Tensor) -> torch.Tensor:
+    """Standard deviation over the observed steps of each row, shaped `(B, V, 1)`."""
+    count = observed.sum(dim=-1, keepdim=True).clamp_min(1)
+    mean = (context * observed).sum(dim=-1, keepdim=True) / count
+    return ((((context - mean) * observed) ** 2).sum(dim=-1, keepdim=True) / count).sqrt()
+
+
 def _cat_samples(group: list[tuple]) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor]:
     context = torch.cat([sample[0] for sample in group], dim=0)
     known = None if group[0][1] is None else torch.cat([sample[1] for sample in group], dim=0)
@@ -105,22 +112,24 @@ def train(args: argparse.Namespace) -> None:
             overall = 0.0
             for group in groups.values():
                 context, known, past, future = _cat_samples(group)
+                observed = torch.isfinite(context)
+                context = torch.where(observed, context, torch.zeros_like(context))
                 quantiles = forecaster._forecast_raw(
                     context,
-                    torch.ones_like(context, dtype=torch.bool),
+                    observed,
                     future.shape[-1],
                     past_covariates=past,
                     known_covariates=known,
                 )
                 if group[0][4] == "distill":
-                    scale = context.std(dim=-1, keepdim=True).clamp_min(0.1).unsqueeze(-1)
+                    scale = _observed_std(context, observed).clamp_min(0.1).unsqueeze(-1)
                     if teacher is None:
                         loss = pinball_loss(quantiles / scale, future / scale[..., 0], forecaster.quantile_levels)
                     else:
                         with torch.no_grad():
                             labels = teacher._forecast_raw(
                                 context,
-                                torch.ones_like(context, dtype=torch.bool),
+                                observed,
                                 future.shape[-1],
                                 past_covariates=past,
                                 known_covariates=known,
