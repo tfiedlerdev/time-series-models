@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from timestral import TimestralForecaster
 
+from benchmarks.model import SIZES
 from training.batches import next_batch
 from training.data_config import DEFAULT_DATA_CONFIG, DataConfig
 from training.eval import evaluate, pinball_loss, print_scores
@@ -37,10 +38,11 @@ def _batch_key(sample: tuple) -> tuple:
 
 
 def _load_teacher(data: DataConfig, device: torch.device) -> TimestralForecaster | None:
-    """The frozen pretrained model, when the distill task takes its labels from it."""
+    """The frozen pretrained model of the configured size, when the distill task takes its labels from it."""
     if data.distill is None or data.distill.label != "teacher":
         return None
-    teacher = TimestralForecaster.from_pretrained("mistralai/Timestral-5M", device=device)
+    teacher = TimestralForecaster.from_pretrained(SIZES[data.distill.teacher], device=device)
+    teacher.model.eval()
     teacher.model.requires_grad_(False)
     return teacher
 
