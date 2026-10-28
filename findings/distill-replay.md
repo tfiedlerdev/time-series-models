@@ -35,16 +35,18 @@ Teacher labels put the kernel error back to 0.274, next to the pretrained 0.268,
 
 Truth labels keep more of that single-view gain, 0.582, and they beat the pretrained model on intermittent counts, 0.511 against 0.526. The kernel error only comes back to 0.288.
 
-TIME for the two runs is [`w6a0er5y`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/w6a0er5y) and [`h2bu1puf`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/h2bu1puf). On the 60 tasks scored so far, the same tasks for every model:
+TIME, all 98 tasks, is [`w6a0er5y`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/w6a0er5y) for the teacher run and [`h2bu1puf`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/h2bu1puf) for the truth run.
 
-| model | mean relative change |
-|---|---:|
-| ref-main | -4.0% |
-| distill-truth-w25 | -1.1% |
-| distill-teacher-w25 | -0.2% |
+| model | TIME MASE, 98 tasks | TIME quantile loss | fev SQL, 26 covariate tasks |
+|---|---:|---:|---:|
+| ref-main | -3.5% | -2.8% | -8.0% on the 20 tasks it finished |
+| distill-truth-w25 | -1.1% | -0.9% | -4.3% |
+| distill-teacher-w25 | -0.1% | -0.0% | -2.3% |
 
-The reference is at -4.0% on this slice and -3.5% on all 98, so the slice is the harder part of TIME. Teacher is worse than the pretrained model by more than one percent on 3 of the 60. The worst is Coastal_T_S/20T/medium, -2.6%, where the reference is at -16.1%.
+The fev runs are [`qv48b031`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/qv48b031) and [`2ef5ouxx`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/2ef5ouxx). On the 20 fev tasks the reference finished, the teacher run is at -3.0% SQL against the reference's -8.0%.
+
+Teacher is better than the pretrained model on 32 of the 98 TIME tasks and worse on 66. The losses are small: worse by more than one percent on 4 tasks, and the only one past two percent is Coastal_T_S/20T/medium at -2.6%, where the reference is at -16.1%. It beats the reference by more than two percentage points on 54 of the 98. On fev it is better on 5 of 26 tasks.
 
 ## What follows
 
-A fifth of the updates, labelled by the frozen pretrained model on broad synthetic series, holds the TIME error at the pretrained level on this slice and keeps the many-view pooling gain. Labelling those series with the truth keeps more of the fine-tune and gives back about a percent of TIME. The teacher run is the one that meets the aim of a fine-tune that still pools and stops costing the forecasts the pretrained model already had. The full 98-task means will land in the two TIME runs above.
+A fifth of the updates, labelled by the frozen pretrained model on broad synthetic series, brings the TIME mean back to the pretrained model and keeps the many-view pooling gain. It does that by shrinking the fine-tune's regressions, not by beating the pretrained model on a block of tasks. Labelling those series with the truth keeps more of the single-view pooling gain and leaves about a percent of TIME, and 4.3% of fev SQL, on the table. The teacher run is the one that still pools and stops costing the forecasts the pretrained model already had.
