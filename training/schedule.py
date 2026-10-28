@@ -45,6 +45,7 @@ EVAL_TASKS = (
     "generic/events",
     "generic/piecewise",
     "generic/profile",
+    "real/heldout",
 )
 
 

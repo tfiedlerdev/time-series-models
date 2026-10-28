@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_yaml import parse_yaml_file_as
 
 from benchmarks.model import SIZES
+from training.real_sources import REAL_DATASETS
 
 DEFAULT_DATA_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "data.yaml"
 SERIES_KINDS = frozenset(
@@ -239,6 +240,36 @@ class DistillConfig(TaskConfig):
         return self
 
 
+class RealConfig(TaskConfig):
+    """History-only windows of real series. The datasets must come from `REAL_DATASETS`.
+
+    A draw picks a dataset uniformly, then a series and a window in it. `label` and
+    `teacher` mean what they do for the distill task. `max_series` caps how many series
+    of one dataset are kept in memory.
+    """
+
+    datasets: list[str] = Field(default_factory=lambda: list(REAL_DATASETS), min_length=1)
+    label: str = "truth"
+    teacher: str = "5M"
+    context_lens: Weighted = Field(
+        default_factory=lambda: Weighted(values=[128, 256, 512, 1024, 2048, 4096], weights=[1, 1, 2, 2, 2, 1])
+    )
+    horizons: Weighted = Field(
+        default_factory=lambda: Weighted(values=[8, 16, 48, 96, 168, 336], weights=[1, 1, 2, 2, 2, 1])
+    )
+    max_series: int = Field(default=2000, ge=1)
+    min_context: int = Field(default=64, ge=8)
+
+    @model_validator(mode="after")
+    def _sources(self) -> "RealConfig":
+        _known(self.datasets, frozenset(REAL_DATASETS), "real datasets")
+        if self.label not in DISTILL_LABELS:
+            raise ValueError(f"unknown real label {self.label}; allowed values are {sorted(DISTILL_LABELS)}")
+        if self.teacher not in SIZES:
+            raise ValueError(f"unknown teacher size {self.teacher}; allowed values are {list(SIZES)}")
+        return self
+
+
 class DataConfig(BaseModel):
     """Lengths shared by the tasks, and one optional subconfig per task.
 
@@ -259,13 +290,14 @@ class DataConfig(BaseModel):
     long: LongConfig | None = None
     categorical: CategoricalConfig | None = None
     distill: DistillConfig | None = None
+    real: RealConfig | None = None
 
     @classmethod
     def load(cls, path: Path | str = DEFAULT_DATA_CONFIG) -> "DataConfig":
         return parse_yaml_file_as(cls, path)
 
     def tasks(self) -> list[tuple[str, TaskConfig]]:
-        names = ("pool", "history", "exogenous", "past", "multi", "long", "categorical", "distill")
+        names = ("pool", "history", "exogenous", "past", "multi", "long", "categorical", "distill", "real")
         return [(name, getattr(self, name)) for name in names if getattr(self, name) is not None]
 
     @model_validator(mode="after")

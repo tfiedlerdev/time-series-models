@@ -14,7 +14,9 @@ from training.data_config import (
     MultiConfig,
     PastConfig,
     PoolConfig,
+    RealConfig,
 )
+from training.real import draw_window, load_dataset, pack_window
 from training.schedule import CONTEXT_LEN, EXO_HORIZON, HORIZON
 from training.series import lag, make_covariate, make_series, make_signal, observe, pack, seasonal_parts, walk
 
@@ -340,6 +342,24 @@ def make_distill_batch(
     return pack(contexts, False, device), known, past, pack(futures, False, device), tag
 
 
+def make_real_batch(
+    rng: np.random.Generator,
+    device: torch.device,
+    config: RealConfig,
+) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor, str]:
+    """One window of one real series. The label is set in the loop."""
+    while True:
+        name = str(rng.choice(config.datasets))
+        rows, _heldout = load_dataset(name, config.max_series, config.min_context + min(config.horizons.values))
+        if not rows:
+            continue
+        window = draw_window(rng, rows, config.context_lens.draw(rng), config.horizons.values, config.min_context)
+        if window is not None:
+            break
+    context, future = pack_window(*window, device)
+    return context, None, None, future, f"real {name} {context.shape[-1]} h{future.shape[-1]}"
+
+
 def next_batch(
     rng: np.random.Generator,
     batch: int,
@@ -391,6 +411,8 @@ def next_batch(
         tag = "long" + tag.removeprefix("history")
     elif task == "distill":
         context, known, past, future, tag = make_distill_batch(rng, batch, device, config=cfg.distill)
+    elif task == "real":
+        context, known, past, future, tag = make_real_batch(rng, device, cfg.real)
     else:
         context, known, past, future, tag = make_categorical_batch(
             rng, batch, device, config=cfg.categorical, context_len=cfg.context_len, horizon=cfg.horizon
