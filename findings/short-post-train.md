@@ -24,6 +24,8 @@ TIME is all 98 tasks: W&B runs [`7nhonhmu`](https://forge.coreweave.com/wandb/tf
 
 The median fev SQL change is +0.13% for 1500 steps and +0.44% at the lower rate, against +1.27% for the full run.
 
+A second seed of the 1500-step run checks how much of this is noise. W&B runs [`j223h6cu`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/j223h6cu) (training), [`eha1mkgj`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/eha1mkgj) (TIME) and [`77tvaafj`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/77tvaafj) (fev). It lands at TIME MASE +0.21% (8 tasks >+1%) and fev SQL +1.10% (median +0.08%), against +0.06% and +0.83% for seed 0. A TIME gap of 0.15 points and a fev gap of 0.3 points are therefore within seed noise at this length. The drop from +2.3% to about +1% on fev is not.
+
 ## What the fine-tune keeps
 
 The training eval, 32 series and the same draws for every model. W&B runs [`oh8ud8g3`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/oh8ud8g3) (pretrained, ref-main, teacher) and [`ek85zo39`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/ek85zo39) (pretrained, 1500 steps, lr 1e-5). The pretrained column is the same in both.
