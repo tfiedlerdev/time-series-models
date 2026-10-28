@@ -1,0 +1,93 @@
+# The checked-in mixture plus history-only replay on broad generic series
+# (KernelSynth, composite, intermittent counts) at contexts 256-4096 and
+# horizons 16-336. Labels: teacher.
+#
+# Training mixture. A task set to null is left out. A task's share of the draws is
+# its weight divided by the sum of the weights. Series shapes (the pooling signal,
+# a walk, a season, a trend) live in training/series.py.
+
+context_len: 512
+horizon: 96
+long_context: 2048
+exo_horizon: 168
+
+pool:
+  weight: 0.15
+  counts:
+    values: [0, 1, 2, 4, 8, 16, 32, 64]
+    weights: [0.12, 0.16, 0.16, 0.16, 0.16, 0.16, 0.05, 0.03]
+  past_view_probability: 0.5
+  past_view_below: 64
+  narrow_width: 20
+  wide_width: 64
+  wide_from: 32
+  distractor_probability: 0.5
+  distractor_min: 1
+  distractor_max: 8
+  distractor_kinds: [walk, season, trend]
+
+history:
+  weight: 0.20
+  kinds: [walk, season, trend]
+  long_horizon_probability: 0.25
+
+exogenous:
+  weight: 0.40
+  no_driver_probability: 0.25
+  no_driver_decoy_counts: [1, 2]
+  known_counts:
+    values: [1, 2, 3]
+    weights: [2, 1, 1]
+  decoy_counts:
+    values: [1, 2]
+    weights: [2, 1]
+  decoy_kinds: [both, daily, trend]
+  long_horizon_probability: 0.5
+  trend_probability: 0.5
+  nonnegative_probability: 0.5
+  gate_probability: 0.5
+  static_probability: 0.5
+  lag_min: 0
+  lag_max: 5
+  noise_min: 0.05
+  noise_max: 0.45
+
+past:
+  weight: 0.10
+  counts:
+    values: [1, 2, 3]
+  kinds: [walk, season, trend]
+  lag_min: 1
+  lag_max: 12
+  noise_min: 0.05
+  noise_max: 0.3
+
+multi:
+  weight: 0.06
+  variate_min: 2
+  variate_max: 4
+  coupling_min: 0.4
+  coupling_max: 1.2
+  innovation_scale: 0.25
+
+long:
+  weight: 0.05
+  kinds: [train, walk, season, trend]
+
+categorical:
+  weight: 0.04
+  bins_probability: 0.5
+  n_codes: 4
+  quantile_edges: [0.25, 0.5, 0.75]
+
+distill:
+  weight: 0.25
+  kinds: [kernel, composite, intermittent]
+  label: teacher
+  teacher: 123M
+  context_lens:
+    values: [256, 512, 1024, 2048, 4096]
+    weights: [1, 2, 2, 2, 1]
+  horizons:
+    values: [16, 48, 96, 168, 336]
+    weights: [1, 2, 2, 2, 1]
