@@ -149,6 +149,36 @@ class PastConfig(TaskConfig):
         return self
 
 
+class GraphConfig(TaskConfig):
+    """A target composed of covariates that depend on each other. See training/graph.py.
+
+    Each covariate is removed, kept only through the context, masked on stretches of the
+    context, or kept whole, with the three probabilities given and the rest for whole.
+    """
+
+    node_counts: Weighted = Field(default_factory=lambda: Weighted(values=[3, 4, 5, 6]))
+    max_parents: int = Field(default=2, ge=1)
+    delay_max: int = Field(default=24, ge=1)
+    noise_min: float = Field(default=0.05, ge=0)
+    noise_max: float = Field(default=1.0, gt=0)
+    own_scale: float = Field(default=0.1, ge=0)
+    target_parent_counts: Weighted = Field(default_factory=lambda: Weighted(values=[1, 2, 3], weights=[1, 2, 1]))
+    removed_probability: float = Field(default=0.2, ge=0, le=1)
+    context_probability: float = Field(default=0.25, ge=0, le=1)
+    masked_probability: float = Field(default=0.15, ge=0, le=1)
+    min_gain: float = Field(default=0.1, ge=0, lt=1)
+    lead_min: int = Field(default=8, ge=1)
+    max_tries: int = Field(default=8, ge=1)
+
+    @model_validator(mode="after")
+    def _ranges(self) -> "GraphConfig":
+        if self.noise_max < self.noise_min:
+            raise ValueError("noise_max is below noise_min")
+        if self.removed_probability + self.context_probability + self.masked_probability > 1:
+            raise ValueError("removed, context, and masked probabilities sum to more than 1")
+        return self
+
+
 class MultiConfig(TaskConfig):
     """Several series that share one latent factor, forecast jointly."""
 
@@ -243,6 +273,7 @@ class DataConfig(BaseModel):
     multi: MultiConfig | None = None
     long: LongConfig | None = None
     categorical: CategoricalConfig | None = None
+    graph: GraphConfig | None = None
     distill: DistillConfig | None = None
 
     @classmethod
@@ -250,7 +281,7 @@ class DataConfig(BaseModel):
         return parse_yaml_file_as(cls, path)
 
     def tasks(self) -> list[tuple[str, TaskConfig]]:
-        names = ("pool", "history", "exogenous", "past", "multi", "long", "categorical", "distill")
+        names = ("pool", "history", "exogenous", "past", "multi", "long", "categorical", "graph", "distill")
         return [(name, getattr(self, name)) for name in names if getattr(self, name) is not None]
 
     @model_validator(mode="after")

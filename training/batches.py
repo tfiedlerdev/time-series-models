@@ -15,6 +15,7 @@ from training.data_config import (
     PastConfig,
     PoolConfig,
 )
+from training.graph import make_graph_batch
 from training.schedule import CONTEXT_LEN, EXO_HORIZON, HORIZON
 from training.series import lag, make_covariate, make_series, make_signal, observe, pack, seasonal_parts, walk
 
@@ -377,6 +378,10 @@ def next_batch(
             rng, batch, kind, cfg.long_context, device, horizon=cfg.horizon
         )
         tag = "long" + tag.removeprefix("history")
+    elif task == "graph":
+        context, known, past, future, tag = make_graph_batch(
+            rng, device, config=cfg.graph, context_len=cfg.context_len, horizon=cfg.horizon
+        )
     elif task == "distill":
         context, known, past, future, tag = make_distill_batch(rng, batch, device, config=cfg.distill)
     else:
