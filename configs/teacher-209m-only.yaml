@@ -1,0 +1,19 @@
+# Replay only: generic series labelled by the frozen 209M model, with no other task.
+# Whether those labels alone move the 5M model past its pretrained forecasts.
+
+context_len: 512
+horizon: 96
+long_context: 2048
+exo_horizon: 168
+
+distill:
+  weight: 1.0
+  kinds: [kernel, composite, intermittent]
+  label: teacher
+  teacher: 209M
+  context_lens:
+    values: [256, 512, 1024, 2048, 4096]
+    weights: [1, 2, 2, 2, 1]
+  horizons:
+    values: [16, 48, 96, 168, 336]
+    weights: [1, 2, 2, 2, 1]
