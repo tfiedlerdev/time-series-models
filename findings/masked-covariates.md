@@ -27,7 +27,7 @@ With two readings the masked run lands on its own fully observed error, 0.478 ag
 
 Pooling is unchanged. At 64 views the masked run is at 0.257 against the reference's 0.253.
 
-TIME is W&B run [`b09lxsuf`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/b09lxsuf). On the 60 tasks scored so far the mean relative change is -3.8%, and the reference is at -4.0% on the same tasks. The reference's finished 98-task TIME run is -3.5%, [`c1zb66vp`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/c1zb66vp).
+TIME, all 98 tasks, is W&B run [`b09lxsuf`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/b09lxsuf). The mean relative change in MASE is -3.5%, the same as the reference's finished TIME run, [`c1zb66vp`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/c1zb66vp). The fev covariate subset is [`lj0ayrdf`](https://forge.coreweave.com/wandb/tfiedlerdev/time-series-models/runs/lj0ayrdf): SQL -6.3% on 26 tasks.
 
 ## What follows
 
