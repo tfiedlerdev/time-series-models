@@ -11,7 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_yaml import parse_yaml_file_as
 
 DEFAULT_DATA_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "data.yaml"
-SERIES_KINDS = frozenset({"walk", "season", "trend", "kernel", "composite", "intermittent"})
+SERIES_KINDS = frozenset(
+    {"walk", "season", "trend", "kernel", "composite", "intermittent", "regime", "events", "piecewise", "profile"}
+)
 DISTILL_LABELS = frozenset({"teacher", "truth"})
 DECOY_KINDS = frozenset({"both", "daily", "trend"})
 
@@ -202,6 +204,10 @@ class DistillConfig(TaskConfig):
     forecast back toward the pretrained one wherever no other task asks for a change.
     With `label: truth` it is the ordinary pinball loss against the series itself.
     Covariate rows, when drawn, are unrelated generic series.
+
+    `gap_probability` blanks one to four stretches of the context with NaN, so the
+    model also replays forecasts from a context with missing values. `quantize_probability`
+    rounds a series onto a coarse grid, like a sensor or a count in fixed units.
     """
 
     kinds: list[str] = Field(default_factory=lambda: ["kernel", "composite", "intermittent"], min_length=1)
@@ -215,6 +221,8 @@ class DistillConfig(TaskConfig):
     past_probability: float = Field(default=0.0, ge=0, le=1)
     known_probability: float = Field(default=0.0, ge=0, le=1)
     covariate_max: int = Field(default=3, ge=1)
+    gap_probability: float = Field(default=0.0, ge=0, le=1)
+    quantize_probability: float = Field(default=0.0, ge=0, le=1)
 
     @model_validator(mode="after")
     def _kinds(self) -> "DistillConfig":

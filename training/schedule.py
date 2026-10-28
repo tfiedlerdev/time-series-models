@@ -41,6 +41,10 @@ EVAL_TASKS = (
     "generic/kernel",
     "generic/composite",
     "generic/intermittent",
+    "generic/regime",
+    "generic/events",
+    "generic/piecewise",
+    "generic/profile",
 )
 
 

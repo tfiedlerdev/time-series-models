@@ -313,10 +313,21 @@ def make_distill_batch(
     length = context_len + horizon
     n_past = int(rng.integers(1, cfg.covariate_max + 1)) if rng.random() < cfg.past_probability else 0
     n_known = int(rng.integers(1, cfg.covariate_max + 1)) if rng.random() < cfg.known_probability else 0
+    quantize = rng.random() < cfg.quantize_probability
+    gaps = rng.random() < cfg.gap_probability
     contexts, futures, pasts, knowns = [], [], [], []
     for _ in range(batch):
         series = make_series(rng, length, kind)
-        contexts.append(series[:context_len])
+        if quantize:
+            step = float(np.std(series[:context_len])) * float(rng.uniform(0.02, 0.3)) + 1e-6
+            series = np.round(series / step) * step
+        context = series[:context_len].copy()
+        if gaps:
+            for _ in range(int(rng.integers(1, 5))):
+                width = int(rng.integers(1, max(2, context_len // 8)))
+                start = int(rng.integers(0, context_len - width - 16))
+                context[start : start + width] = np.nan
+        contexts.append(context)
         futures.append(series[context_len:])
         if n_past:
             pasts.append(np.stack([make_series(rng, context_len, str(rng.choice(cfg.kinds))) for _ in range(n_past)]))
@@ -325,6 +336,7 @@ def make_distill_batch(
     past = torch.tensor(np.stack(pasts), dtype=torch.float32, device=device) if pasts else None
     known = torch.tensor(np.stack(knowns), dtype=torch.float32, device=device) if knowns else None
     tag = f"distill {kind} {context_len} h{horizon} past{n_past} known{n_known}"
+    tag += " quantized" * quantize + " gaps" * gaps
     return pack(contexts, False, device), known, past, pack(futures, False, device), tag
 
 

@@ -19,7 +19,7 @@ from training.series import make_covariate, make_signal
 # The view_curve.py figure, logged at a few counts. That script sweeps every count.
 VIEW_COUNTS = (0, 1, 8, 32, 64)
 VIEW_POOL = 64
-GENERIC_KINDS = ("kernel", "composite", "intermittent")
+GENERIC_KINDS = ("kernel", "composite", "intermittent", "regime", "events", "piecewise", "profile")
 GENERIC_CONTEXT = 1024
 
 
